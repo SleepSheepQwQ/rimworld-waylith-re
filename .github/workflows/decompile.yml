@@ -1,0 +1,31 @@
+name: decompile
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "dll glob"
+        default: "dlls/*.dll"
+jobs:
+  decompile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install ilspycmd
+        run: dotnet tool install -g ilspycmd
+      - name: Decompile
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          mkdir -p out
+          for f in ${{ github.event.inputs.target || 'dlls/*.dll' }}; do
+            b=$(basename "$f" .dll)
+            echo "== $b"
+            ilspycmd -p -o "out/$b" "$f" 2>&1 | tail -5 || true
+          done
+          find out -maxdepth 2 -type d | head -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: decompiled
+          path: out
