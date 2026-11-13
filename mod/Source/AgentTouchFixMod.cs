@@ -426,10 +426,14 @@ namespace AgentTouchFix
             try { PipelineRetry.Install(); }
             catch (Exception e) { Refl.ErrOnce("pipeline-retry install failed: " + e); }
 
+            // v29: what is actually handed to the backend for each icon (rect/uv/color/material).
+            try { DrawCallProbe.Install(); }
+            catch (Exception e) { Refl.ErrOnce("drawcall probe install failed: " + e); }
+
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v28-piperetry (2.1.3) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
+            Refl.Info("BUILD v29-drawcall (2.1.4) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
 
