@@ -154,16 +154,21 @@
    it re-hydrates only part of the mip chain is back - the panel-background plus incomplete-texture
    picture.
    files/game/agenttouchfix.texkeep selects how much of that is suppressed:
-     grace (default, also when the file is absent) - Texture2D.Evict is skipped while
-       GpuTextureService.RenderFrameSerial - GpuResource.LastUseFrame is below the frame count read
-       from files/game/agenttouchfix.texgrace (default 900 frames = 15 s at 60 fps, clamped to
-       60..3600). A cold texture is still evicted exactly as shipped, so the resident set cannot grow
-       without bound.
+     grace (default, also when the file is absent) - the eviction is skipped in two cases:
+       a) small textures: GpuResource.AllocatedBytes is at or below the byte count in
+          files/game/agenttouchfix.texsmall (default 1048576 = 1 MiB, 0 disables the rule). Icons and
+          small UI bits are single small textures - evicting one only buys a reload of the same bytes
+          the next time it is drawn, and a few thousand of them resident is tens of MiB.
+       b) hot textures: GpuTextureService.RenderFrameSerial - GpuResource.LastUseFrame is below the
+          frame count in files/game/agenttouchfix.texgrace (default 900 frames = 15 s at 60 fps,
+          clamped to 60..3600). A cold large texture is still evicted exactly as shipped, so the
+          resident set cannot grow without bound.
      on  - EvictWhenCached and DrainPendingEvictions are both short-circuited, i.e. every texture
        stays resident. This is the control case for the experiment, not a default.
      off - no eviction method is patched at all; the port behaves exactly as shipped.
-   Log: `texkeep mode=grace grace=900 skipped=N evicted=N` (at most one line per 2 s) plus the
-   startup line that names the mode, the grace window and which targets were patched.
+   Log: `texkeep mode=grace grace=900 small=1.0MiB skipped=hot:N,small:N evicted=N` (at most one
+   line per 2 s) plus the startup line that names the mode, both windows and which targets were
+   patched.
    Only those eviction entry points are patched: Texture2D.Dispose / DisposeMovedAway /
    TryEvictForResidency / EnsureResident, the upload path, TextureResidency.Offload /
    EvictHostResident and the memory governor are untouched, and when the frame/usage numbers cannot
