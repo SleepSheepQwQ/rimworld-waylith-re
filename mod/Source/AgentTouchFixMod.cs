@@ -305,6 +305,11 @@ namespace AgentTouchFix
             // of the snap switch: snap only governs the developer tool path.
             PickMode.ReadMode();
 
+            // v11: the texture-residency switch (grace / on / off) plus its frame window, read once,
+            // same folder. grace is the default: only evictions of textures used within the last
+            // agenttouchfix.texgrace frames are skipped.
+            TexKeep.ReadMode();
+
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
             Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
@@ -410,7 +415,7 @@ namespace AgentTouchFix
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v10-texprobe (1.8.0-diag) - v9 behaviour kept in full (tips park/suppress/off, developer-tool tap snapping via files/game/agenttouchfix.snap, building double-tap select-all, IME text recovery, focus-loss mouse/key release, ACTION_UP per-button release, SecondUp reset, file-only 1 MB log, NO memory/texture governor patch); NEW: files/game/agenttouchfix.pick (port [default] / exact - exact drops PortUI's 28.8 px radius search when the tapped cell holds nothing, so a tap on empty ground no longer jumps to the nearest entity; the dev-tool snap is unaffected) and read-only texture counters (DdsFallback.TryPlan/TryConvert, Texture2D.Evict, GpuTextureService.GetOrCreateFallbackTexture, TextureResidency.Offload/EvictHostResident) summarised every 30 s as 'tex: decode ok=.. shift>0=.. fail=.. fallback=.. evict=.. offload=.. budget=.. limit=..'");
+            Refl.Info("BUILD v11-texkeep (1.9.0-diag) - v10 behaviour kept in full (tips park/suppress/off, developer-tool tap snapping via files/game/agenttouchfix.snap, pick port/exact via files/game/agenttouchfix.pick, building double-tap select-all, IME text recovery, focus-loss mouse/key release, ACTION_UP per-button release, SecondUp reset, file-only 1 MB log, read-only texture counters every 30 s, NO memory/texture governor patch); NEW: files/game/agenttouchfix.texkeep (grace [default] / on / off) + files/game/agenttouchfix.texgrace (frames, default 900) - grace skips Texture2D.Evict only while RenderFrameSerial - GpuResource.LastUseFrame < grace, on short-circuits EvictWhenCached + DrainPendingEvictions, off patches no eviction method; logged as 'texkeep mode=grace grace=900 skipped=.. evicted=..'");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
 
@@ -418,6 +423,11 @@ namespace AgentTouchFix
             // they cannot change rendering: every one of them only reads and counts.
             try { TexProbe.Install(); }
             catch (Exception e) { Refl.ErrOnce("tex probe install failed: " + e); }
+
+            // v11: the eviction gate. Installed last, after the read-only Evict counter, and it only
+            // ever answers "do not run the original" for the methods its mode owns (see TexKeep).
+            try { TexKeep.Install(); }
+            catch (Exception e) { Refl.ErrOnce("texkeep install failed: " + e); }
 
         }
 

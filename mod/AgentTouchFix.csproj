@@ -7,11 +7,11 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Version>1.8.0</Version>
+    <Version>1.9.0</Version>
     <!-- diagnostic build identifier: shown in the bootstrap log line, never in AssemblyVersion -->
-    <InformationalVersion>1.8.0-diag</InformationalVersion>
-    <AssemblyVersion>1.8.0.0</AssemblyVersion>
-    <FileVersion>1.8.0.0</FileVersion>
+    <InformationalVersion>1.9.0-diag</InformationalVersion>
+    <AssemblyVersion>1.9.0.0</AssemblyVersion>
+    <FileVersion>1.9.0.0</FileVersion>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <DebugType>none</DebugType>

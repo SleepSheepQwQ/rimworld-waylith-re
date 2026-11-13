@@ -3,7 +3,7 @@
   <name>AgentTouchFix</name>
   <author>SleepSheepQwQ</author>
   <packageId>sleepsheep.waylith.agenttouchfix</packageId>
-  <modVersion>1.8.0</modVersion>
+  <modVersion>1.9.0</modVersion>
   <supportedVersions>
     <li>1.7</li>
   </supportedVersions>
@@ -144,8 +144,33 @@
    fails (format code, input size, shift, budget, limit). The patch summary line
    `tex: probes ok=.. skipped=.. failed=..` says whether the counters could be installed at all.
 
+12) Automatic texture eviction can be held back for textures that are in use (v11).
+   The v10 counters showed the texture fault is eviction, not the decoded-texture budget: in one
+   minute at 256 MiB and a 4096 px limit not a single mip was reduced, yet about 120 textures per
+   second were thrown away. The port queues every texture that has a SourcePath for eviction
+   (Texture2D.EvictWhenCached) and every frame evicts whatever is queued as soon as the disk cache
+   holds a copy (DrainPendingEvictions -> Texture2D.Evict), without asking whether that texture is
+   on screen. A texture evicted in the frame it is drawn samples the 1x1 fallback colour, and while
+   it re-hydrates only part of the mip chain is back - the panel-background plus incomplete-texture
+   picture.
+   files/game/agenttouchfix.texkeep selects how much of that is suppressed:
+     grace (default, also when the file is absent) - Texture2D.Evict is skipped while
+       GpuTextureService.RenderFrameSerial - GpuResource.LastUseFrame is below the frame count read
+       from files/game/agenttouchfix.texgrace (default 900 frames = 15 s at 60 fps, clamped to
+       60..3600). A cold texture is still evicted exactly as shipped, so the resident set cannot grow
+       without bound.
+     on  - EvictWhenCached and DrainPendingEvictions are both short-circuited, i.e. every texture
+       stays resident. This is the control case for the experiment, not a default.
+     off - no eviction method is patched at all; the port behaves exactly as shipped.
+   Log: `texkeep mode=grace grace=900 skipped=N evicted=N` (at most one line per 2 s) plus the
+   startup line that names the mode, the grace window and which targets were patched.
+   Only those eviction entry points are patched: Texture2D.Dispose / DisposeMovedAway /
+   TryEvictForResidency / EnsureResident, the upload path, TextureResidency.Offload /
+   EvictHostResident and the memory governor are untouched, and when the frame/usage numbers cannot
+   be read the gate lets every eviction through (one Warn, never a blocked eviction).
+
 Nothing under RwHost.AndroidMemoryAndGcGovernor is patched, and no texture or memory path is written
-(v9, unchanged in v10): the grey / flickering / scrambled textures came from the port itself (quality
+(v9, unchanged in v10 and v11 apart from the v11 eviction gate in item 12): the grey / flickering / scrambled textures came from the port itself (quality
 tier falling to Economy, a small decoded-texture budget, BC sampling through software decode), not
 from the mod. The v10 texture patches are read-only counters installed to prove exactly that.
 
