@@ -158,7 +158,7 @@ jobs:
             strings -el "$DLL" | grep -q "$tgt" \
               || { echo "ERROR: texkeep target literal '$tgt' missing from the DLL"; exit 1; }
           done
-          for bad3 in DisposeMovedAway EnsureResident TryEvictForResidency ReleaseBuffers; do
+          for bad3 in DisposeMovedAway TryEvictForResidency ReleaseBuffers; do   # v13 intentionally calls EnsureResident from the sampling path
             if strings -a "$DLL" | grep -q "$bad3" || strings -el "$DLL" | grep -q "$bad3"; then
               echo "ERROR: mod DLL names '$bad3' - the texkeep gate reached past the eviction entry points"; exit 1
             fi
