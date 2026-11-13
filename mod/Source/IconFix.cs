@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using System.Threading;
 using HarmonyLib;
@@ -27,7 +28,9 @@ namespace AgentTouchFix
         private static int _missed;
         private static int _warned;
 
-        private static FieldInfo _fUiIcon, _fGraphic, _fDefName;
+        private static FieldInfo _fUiIcon, _fGraphic, _fDefName, _fMat;
+        private static bool _noMaterial = true;
+        private static int _matCleared;
         private static MethodInfo _finder;          // ContentFinder<Texture2D>.Get(string, bool)
         private static FieldInfo _fPath;            // Graphic.path
 
@@ -38,6 +41,19 @@ namespace AgentTouchFix
             {
                 if (_fUiIcon == null) Resolve(__instance.GetType());
                 if (_fUiIcon == null) return;
+
+                // v20: build icons that carry a uiIconMaterial (CutoutComplexUI) flicker on this
+                // port, while the ones without a material draw fine from their plain texture.
+                // Drop the material so the UI uses the plain texture path.
+                if (_noMaterial && _fMat != null)
+                {
+                    object mat = _fMat.GetValue(__instance);
+                    if (mat != null)
+                    {
+                        _fMat.SetValue(__instance, null);
+                        Interlocked.Increment(ref _matCleared);
+                    }
+                }
 
                 object cur = _fUiIcon.GetValue(__instance);
                 if (cur != null) return;                       // the game resolved it
@@ -79,6 +95,7 @@ namespace AgentTouchFix
             _fUiIcon = t.GetField("uiIcon", BindingFlags.Public | BindingFlags.Instance);
             _fGraphic = t.GetField("graphic", BindingFlags.Public | BindingFlags.Instance);
             _fDefName = t.GetField("defName", BindingFlags.Public | BindingFlags.Instance);
+            _fMat = t.GetField("uiIconMaterial", BindingFlags.Public | BindingFlags.Instance);
 
             try
             {
@@ -103,6 +120,18 @@ namespace AgentTouchFix
         {
             Type t = Refl.T("Verse.BuildableDef");
             if (t == null) { Refl.Warn("iconfix: Verse.BuildableDef not found"); return; }
+
+            try
+            {
+                const string sw = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.iconmat";
+                if (File.Exists(sw))
+                {
+                    string v = (File.ReadAllText(sw) ?? "").Trim().ToLowerInvariant();
+                    _noMaterial = !(v.StartsWith("keep") || v == "off" || v == "0");
+                }
+                Refl.Info("iconfix: uiIconMaterial " + (_noMaterial ? "cleared (plain texture path)" : "kept (shipped)"));
+            }
+            catch (Exception e) { Refl.Warn("iconfix: iconmat switch: " + e.Message); }
 
             MethodInfo target = t.GetMethod("ResolveIcon",
                 BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
