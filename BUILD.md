@@ -727,3 +727,161 @@ lands on the first frame back — same as a `Background` event arriving just bef
   the button must be released; hold W and background the app — the pawn must stop; with a mouse
   drag that ends while a second button is held, the second button must stay down and not re-click;
   and going to the home screen must produce the `TRIM_MEMORY_UI_HIDDEN(20)` log line (once per 5 s).
+
+> The v8 checklist above still asks for the `TRIM_MEMORY_UI_HIDDEN(20)` line — v9 removed that
+> patch (see §11.1), so that item no longer applies.
+
+## 11. v9-notex build (version 1.7.0) — no memory / texture patch, tooltips parked
+
+The v7/v8 memory work is gone for good, and the sticky tooltip is fixed where it actually starts:
+at the virtual cursor.
+
+### 11.1 Removed: every governor / texture patch
+
+`mod/Source/GovernorPatches.cs` was **deleted** and with it all three install points:
+
+| patch | status in v9 |
+| --- | --- |
+| `AndroidMemoryAndGcGovernor.GameBoundary` (v7 A, remember the release timestamp) | gone |
+| `AndroidMemoryAndGcGovernor.RenderBoundary` (v7 A, skip the second texture release) | gone |
+| `AndroidMemoryAndGcGovernor.OnTrimMemory` (v8 D, answer UI_HIDDEN with `Request(1)`) | gone |
+
+v9 patches **no** `AndroidMemoryAndGcGovernor` method and calls no texture entry point
+(`RequestMemoryTrim`, `PushTexture`, `TextureCacheStore`). Reason: the grey / flickering / scrambled
+textures were caused by the port itself — its mobile profile drops to `Economy`, the decoded-texture
+budget is 32 MiB and BC sampling goes through a software decode path — and intercepting the memory
+governor on such a machine turns "a flash" into "the whole screen is wrong".
+
+CI now enforces this in `Verify no governor / texture patch (v9)`:
+`mod/Source/GovernorPatches.cs` must not exist, `grep GovernorPatches mod/Source` must find nothing,
+and the produced DLL must not contain `AndroidMemoryAndGcGovernor`, `GameBoundary`, `RenderBoundary`,
+`OnTrimMemory`, `RequestMemoryTrim`, `PushTexture`, `TextureCacheStore`, `renderTrim` or
+`GovernorPatches` in **either** string heap (a .NET assembly keeps its literals in the `#US` heap as
+UTF-16, so both `strings -a` and `strings -el` are checked). It must contain `agenttouchfix.tips`,
+`tips mode=` and `BUILD v9-notex` — so the switch cannot silently disappear either.
+
+### 11.2 Tooltips: the cursor is parked, not just the tip suppressed
+
+v6 suppressed `TipRegion` while "the cursor had not moved for 300 ms", which was an inference about
+state. The actual mechanism is simpler and was read out of the decompiled host:
+
+```
+TouchControls.Translate(c)            RwHost/TouchControls.cs:196
+  case TouchSignal.Tap/DoubleTap/Context:
+      Click(0, c.X, c.Y)              // Click() -> :269
+  Click(): Native.glfwAndroidPushCursorPos(x, y); push press; push release;
+```
+
+Nothing ever moves the cursor away from the tap point, so `Event.current.mousePosition` stays on the
+button/cell, `Mouse.IsOver(rect)` is true forever, the tip is re-registered on every Repaint (and the
+hover highlight stays lit). `ClassicTouchControls` has its own copy of the same `Click()`.
+
+v9 therefore pushes the cursor **off screen** when the gesture is over:
+
+* postfix on `RwHost.TouchControls.OnTouch` (modern chain) and on
+  `RwHost.ClassicTouchControls.OnTouch` (classic chain);
+* only for `ACTION_UP` with no other finger left (`PointerCount <= 1`) or `ACTION_CANCEL`;
+* `RwHost.Native.glfwAndroidPushCursorPos(-1, -1)` through reflection (`double, double`; the argument
+  is converted to the resolved parameter type), so the mod still carries no `RwHost` /
+  `Mono.Android` reference;
+* one push per frame (`Time.frameCount`, else `TickCount / 16`) — the classic chain is called from
+  the modern one, so both postfixes see the same `ACTION_UP`;
+* the native input queue is a 4096-entry ring (40-byte entries), so the park entry is queued *after*
+  the press/release entries that carry the tap position — the tap itself is not affected.
+
+The `TipRegion` suppression stays installed as the second line of defence.
+
+### 11.3 The switch: `files/game/agenttouchfix.tips`
+
+Read once at startup, same folder as `agenttouchfix.log` / `.diag` / `.snap`:
+
+| value | behaviour |
+| --- | --- |
+| `park` **default** (also when the file is absent) | park the cursor on release **and** keep the `TipRegion` suppression |
+| `suppress` | only the `TipRegion` suppression, the cursor is never moved |
+| `off` | neither; the patches stay installed and return immediately (no `Event.current.Use()`, no GUI change) |
+
+Decision timing — from the `OnTouch` timestamps and the `ACTION_DOWN` time only, no cursor-dwell
+inference any more:
+
+| state | result |
+| --- | --- |
+| no touch event for 2 s | allowed (desktop / real mouse) |
+| finger down < 500 ms | suppressed |
+| finger down ≥ 500 ms | allowed — the user asked for the description |
+| released after such a hold, within 800 ms | allowed (no blinking) |
+| within 2 s of the last up / cancel | suppressed |
+| afterwards, while `Input.mousePosition` has not moved since the previous sample | suppressed (still parked) |
+
+Log (file only, at most one line per 10 s):
+`tips mode=park suppressed=12 allowed=hold/real-mouse hold=3 real-mouse=40 idle=2 parked=5`, plus
+`tips mode=park parked=N (cursor pushed to (-1,-1) …)` from the park path. The startup line
+`tips mode=<mode> (… )` records which switch value was read.
+
+Known risk of `park`: if this port's `glfwAndroidPushCursorPos` clamped a negative coordinate to
+`(0,0)` instead of taking it off screen, the tip would return to the top-left corner widget; the
+suppression would still be in place, and `agenttouchfix.tips = suppress` restores v6-style
+behaviour without touching the cursor.
+
+### 11.4 Everything else is v8, unchanged
+
+Tap snapping (`agenttouchfix.snap`), building double-tap select-all, IME text recovery
+(`TextEditMailbox.TryTake`), mouse/key release on focus loss / pause / surface destroy,
+`ACTION_UP` releasing only the lifted button, `SecondUp` state reset, file-only logging with 1 MB
+rotation. Only the tooltip path and the removed governor patches differ.
+
+Harmony targets installed at startup (17 `Add(...)` entries, each logged as
+`patched <label> -> <assembly>!<type>.<method>`), plus 6 `TipRegion` / `TipRegionByKey` overloads:
+
+```
+RimWorld.Selector.HandleMapClicks            prefix
+PortUI.MobileSelectionController.Tap         prefix
+Verse.UI.MouseCell                           prefix (priority 700)
+Verse.UI.MouseMapPosition                    prefix (priority 700, generic over Vector3)
+PortUI.QuickOrderWheel.Open                  prefix
+LudeonTK.DebugTool.DebugToolOnGUI            prefix
+Ports1de.TouchGestureEngine.SecondUp         postfix        (RwHost copy, pinned)
+RwHost.TouchControls.OnTouch                 prefix+postfix
+RwHost.ClassicTouchControls.OnTouch          prefix+postfix (v9: postfix parks the cursor)
+RwHost.MainActivity.SurfaceDestroyed         prefix
+RwHost.MainActivity.OnConfigurationChanged   prefix
+RwHost.MainActivity.OnWindowFocusChanged     prefix
+RwHost.MainActivity.OnPause                  prefix
+RwHost.MainActivity.OnKeyDown                prefix
+RwHost.MainActivity.OnKeyUp                  prefix
+RwHost.MainActivity.MouseEvent               prefix
+PortUI.Ports1de.TextEditMailbox.TryTake      postfix
+Verse.TooltipHandler.TipRegion        x2     prefix (parameterless)
+Verse.TooltipHandler.TipRegionByKey   x4     prefix (parameterless)
+```
+
+The diagnostics in `DiagPatches.cs` (`RwHost.GameCamera.Add`, `RwHost.TouchCamera.Add`,
+both `OnTouch` methods) are only installed when `files/game/agenttouchfix.diag` exists; with the flag
+absent `Diag.Install()` returns before patching anything.
+
+### 11.5 Verification and build
+
+* target shapes re-read from `dlls/RwHost.dll` / `dlls/Assembly-CSharp.dll` metadata (`dnfile` 0.18.0):
+  `RwHost.Native.glfwAndroidPushCursorPos` (2 parameters, matching the decompiled
+  `(double x, double y)`), `RwHost.TouchControls.OnTouch` (1), `RwHost.ClassicTouchControls.OnTouch`
+  (1), and exactly 6 `TipRegion`/`TipRegionByKey` overloads (2 + 4) on `Verse.TooltipHandler`.
+* the produced DLL contains no `AndroidMemoryAndGcGovernor` / `GameBoundary` / `RenderBoundary` /
+  `OnTrimMemory` / `RequestMemoryTrim` / `PushTexture` / `TextureCacheStore` / `renderTrim` /
+  `GovernorPatches` in either string heap (0 occurrences, checked independently of CI with a Python
+  scanner over the ASCII and UTF-16LE runs), and does contain `BUILD v9-notex`, `tips mode=`,
+  `agenttouchfix.tips` and `glfwAndroidPushCursorPos`.
+* assembly references are still exactly `0Harmony`, `Assembly-CSharp`, `System.Runtime` — no
+  `RwHost` / `PortUI` / `Mono.Android` / `UnityEngine` / `Waylith` reference.
+* CI run **43467145188** (`4f43b85`), `dotnet build -c Release`: **0 warnings, 0 errors**, reference
+  guard OK, `no governor / texture patch: OK`, `tips switch literals: OK`.
+* `Assemblies/AgentTouchFix.dll` **68,096 bytes**, md5 `d48bef40573d96138a8c3c9bd35cf3de`
+  (sha256 `c2de8138cde15e9091056c9d71a1b2ba5e9abd8f4bf396bd5405ba3ada7c5851`); v8 was 67,072 B.
+* artifact `AgentTouchFix.zip` **30,800 bytes**, md5 `975d9bc83342fda85a47276f92738d72`, staged at
+  `~/.hermes/cache/scratch/agenttouchfix/v9/AgentTouchFix.zip`, unzipped next to it in
+  `v9/AgentTouchFix/` (zip content: `AgentTouchFix/About/About.xml` + `Assemblies/AgentTouchFix.dll`).
+* **not deployed and not run in the game** (as instructed); `ModsConfig.xml` was not touched.
+  First gameplay check with `tips` absent (= `park`): tap a button → no tooltip and no hover
+  highlight left behind; tap and hold 600 ms → the description appears while the finger is down and
+  disappears on release; move a real mouse → tooltips behave normally; capture a region with a dev
+  tool → the park must not shift the click (if taps land wrong, set `agenttouchfix.tips` to
+  `suppress` and re-test, that isolates the native push from everything else).
