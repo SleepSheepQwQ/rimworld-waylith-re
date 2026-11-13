@@ -295,6 +295,9 @@ namespace AgentTouchFix
             // v5: decides silence vs. diagnostics exactly once, before anything can log.
             Refl.ReadDiagFlag();
 
+            // v6: the snap aggressiveness switch (always / auto / off), read once, same folder.
+            SnapGeometry.ReadMode();
+
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
             Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
@@ -325,16 +328,26 @@ namespace AgentTouchFix
                 MI(typeof(PointerPatches), "OnTouch_Prefix"), MI(typeof(PointerPatches), "OnTouch_Postfix"),
                 -1, ref ok, ref skipped, ref failed);
 
+            // v6: the classic chain (mobile-controls.txt without bit 2) never reaches the patch
+            // above, so the tooltip suppressor would never see a touch there. Timestamp only.
+            Add("RwHost.ClassicTouchControls.OnTouch", () => Refl.M(Refl.TPrefer("RwHost", "RwHost.ClassicTouchControls"), "OnTouch"),
+                MI(typeof(TooltipPatches), "Touch_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
             string summary = "patch summary: ok=" + ok + " skipped=" + skipped + " failed=" + failed;
             // v5: silent by default. Only a real patch failure reaches the in-game dialog, and only
             // once per process; everything else lives in agenttouchfix.log.
             if (failed > 0) Refl.ErrOnce(summary);
             else Refl.Info(summary);
 
+            // v6: tooltips are registered from the GUI layer, so they need their own patches. A
+            // failure here must never take the tool/pointer fixes down with it.
+            try { TooltipPatches.Install(); }
+            catch (Exception e) { Refl.Err("tooltip install failed: " + e); }
+
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v5-quiet (1.3.0) - file-only logging, diagnostics opt-in via agenttouchfix.diag; tap snapping via PortUI.Candidates + MouseMapPosition pin unchanged");
+            Refl.Info("BUILD v6-snaptip (1.4.0) - hit-tested tap snapping (always/auto/off) + touch-mode tooltip suppression with long press passthrough");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
         }

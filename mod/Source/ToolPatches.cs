@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Reflection;
 using Verse;
 
@@ -19,6 +18,11 @@ namespace AgentTouchFix
     /// both UI.MouseCell() and UI.MouseMapPosition() are pinned to the resolved target for the
     /// duration of the clickAction. A tap that is a few pixels off the entity now still hits the
     /// entity instead of landing on empty ground.
+    ///
+    /// v6: that forgiveness was too wide for tools that must be exact (clear terrain, spawn). A
+    /// candidate is only accepted when the tap lies inside the thing's own footprint or within
+    /// 16 dp (never more than half a cell) of its projected DrawPos; otherwise the raw tap is used.
+    /// See SnapGeometry for the modes (files/game/agenttouchfix.snap: always / auto / off).
     /// </summary>
     internal static class ToolPatches
     {
@@ -32,17 +36,12 @@ namespace AgentTouchFix
         private static bool _timeResolved;
         private static PropertyInfo _pFrameCount;    // UnityEngine.Time.frameCount
 
-        private static bool _snapResolved;
-        private static MethodInfo _mCandidates;      // PortUI.MobileSelectionController.Candidates(Vector3)
-        private static PropertyInfo _pDrawPos;       // Verse.Thing.DrawPos (UnityEngine.Vector3)
-
         // --- state -------------------------------------------------------------
         private static int _lastFireClock = int.MinValue;
         private static bool _overrideActive;
         private static IntVec3 _overrideCell;        // what UI.MouseCell() reports during clickAction
         private static object _overrideMapPos;       // boxed UnityEngine.Vector3 for UI.MouseMapPosition()
         private static bool _snapWarned;
-        private static int _candFailures;
 
         internal static object CurTool
         {
@@ -153,7 +152,11 @@ namespace AgentTouchFix
             cell = default(IntVec3);
             float x, z;
             if (!TryXZ(vec3, out x, out z)) return false;
-            cell = new IntVec3((int)Math.Round((double)x), 0, (int)Math.Round((double)z));
+            // v6: floor, not round. A map position of 123.7 belongs to cell 123 (this is exactly what
+            // UI.MouseMapPosition().ToIntVec3() does); rounding sent taps in the lower half of a cell
+            // into the next cell, which is where the "empty ground snaps onto the neighbouring item"
+            // reports started.
+            cell = new IntVec3((int)Math.Floor((double)x), 0, (int)Math.Floor((double)z));
             return true;
         }
 
@@ -181,65 +184,43 @@ namespace AgentTouchFix
         }
 
         /// <summary>
-        /// First entry of PortUI.MobileSelectionController.Candidates(tapPos), or null.
-        /// Candidates is the port's own "what did the user aim at" resolution: objects on the exact
-        /// cell, plus - when that cell holds no Thing - every Thing within the 5x5 surrounding cells
-        /// and a 28.8 px screen radius, sorted nearest first. Reusing it keeps dev tool taps
-        /// consistent with what a normal tap would have selected.
+        /// v6 target resolution. PortUI's candidate picker (exact cell first, then the 5x5
+        /// neighbourhood inside a 28.8 px radius, nearest first) is only used as a *proposal*:
+        /// SnapGeometry accepts it when the tap really landed on the thing (own footprint, or within
+        /// 16 dp of its projected DrawPos), and drops it otherwise. With no candidate at all and a
+        /// single thing selected, the selected thing is used (tools that answer to the selection).
+        /// Mode off disables all of this; mode always restores the v5 unconditional snap.
         /// </summary>
-        private static object CandidatesFirst(object tapPos)
+        private static void ResolveTarget(object tapPos, bool haveTap, float tapX, float tapZ, IntVec3 tapCell,
+            out Thing snapped, out IntVec3 targetCell, out object targetPos, out string how)
         {
-            if (tapPos == null) return null;
-            if (!_snapResolved)
-            {
-                _snapResolved = true;
-                Type t = Refl.TPrefer("PortUI", "PortUI.MobileSelectionController");
-                _mCandidates = Refl.M(t, "Candidates");
-                if (_mCandidates == null)
-                    Refl.Warn("PortUI.MobileSelectionController.Candidates not found - tap snapping disabled");
-            }
-            if (_mCandidates == null) return null;
+            int mode = SnapGeometry.Mode;
+            snapped = null;
+            targetCell = tapCell;
+            targetPos = tapPos;
+            how = null;
 
-            object list;
-            try
-            {
-                list = _mCandidates.Invoke(null, new object[] { tapPos });
-                _candFailures = 0;
-            }
-            catch (Exception e)
-            {
-                // A wrong signature must not flood the log or be retried forever: give up after
-                // three failures and keep the plain rounded-cell behaviour.
-                if (++_candFailures < 3) return null;
-                _mCandidates = null;
-                Refl.Warn("Candidates invoke failed " + _candFailures + "x - tap snapping disabled: " + e.Message);
-                return null;
-            }
+            if (!haveTap || mode == SnapGeometry.Off) return;
 
-            IEnumerable items = list as IEnumerable;
-            if (items == null) return null;
-            try
-            {
-                foreach (object o in items) return o;
-            }
-            catch { }
-            return null;
-        }
+            bool candEmpty = true;
+            snapped = SnapGeometry.Resolve(tapPos, tapX, tapZ, out how, out candEmpty);
 
-        /// <summary>Thing.DrawPos, boxed. Virtual property: reflection dispatches to the override.</summary>
-        private static object DrawPosOf(Thing thing)
-        {
-            try
+            if (snapped == null && candEmpty)
             {
-                if (_pDrawPos == null)
+                Thing sel = SnapGeometry.SelectedThing();
+                if (sel != null)
                 {
-                    Type tt = Refl.TPrefer("Assembly-CSharp", "Verse.Thing");
-                    _pDrawPos = Refl.Prop(tt, "DrawPos");
+                    snapped = sel;
+                    how = "selected (no candidate)";
                 }
-                if (_pDrawPos == null) return null;
-                return _pDrawPos.GetValue(thing, null);
             }
-            catch { return null; }
+
+            if (snapped != null)
+            {
+                targetCell = snapped.Position;
+                object dp = SnapGeometry.DrawPosOf(snapped);
+                if (dp != null) targetPos = dp;
+            }
         }
 
         /// <summary>Run the armed debug tool at the tapped map position. Returns false only when no tool is armed.</summary>
@@ -273,22 +254,20 @@ namespace AgentTouchFix
             // "the tap landed correctly but the snap picked the wrong thing".
             Refl.Info("tool fire tap=" + (haveTap ? "(" + N(tapX) + "," + N(tapZ) + ")" : "?")
                 + " cell=" + (haveCell ? "(" + tapCell.x + "," + tapCell.z + ")" : "?")
-                + " things=" + things);
+                + " things=" + things + " snap=" + SnapGeometry.ModeName(SnapGeometry.Mode));
 
-            // Nearest-target snapping through PortUI's own candidate picker.
+            // v6: the candidate is only accepted when the tap really aimed at it.
             Thing snapped = null;
             IntVec3 targetCell = tapCell;
             object targetPos = tapPos;
+            string how = null;
             try
             {
-                snapped = CandidatesFirst(tapPos) as Thing;
+                ResolveTarget(tapPos, haveTap, tapX, tapZ, tapCell, out snapped, out targetCell, out targetPos, out how);
                 if (snapped != null)
-                {
-                    targetCell = snapped.Position;
-                    object dp = DrawPosOf(snapped);
-                    if (dp != null) targetPos = dp;
-                    Refl.Info("tool snap -> " + DefName(snapped) + " at " + targetCell);
-                }
+                    Refl.Info("tool snap -> " + DefName(snapped) + " at " + targetCell + " (" + how + ")");
+                else if (SnapGeometry.Mode != SnapGeometry.Off)
+                    Refl.Info("tool snap none - using the raw tap");
             }
             catch (Exception e)
             {
@@ -313,7 +292,7 @@ namespace AgentTouchFix
             {
                 action.DynamicInvoke();
                 Refl.Info("debug tool fired at " + (haveTap ? targetCell.ToString() : "mouse cell")
-                    + (snapped != null ? " (snapped)" : ""));
+                    + (snapped != null ? " (snapped: " + how + ")" : " (raw tap)"));
             }
             catch (Exception e)
             {

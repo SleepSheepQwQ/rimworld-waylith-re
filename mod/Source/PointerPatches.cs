@@ -243,6 +243,10 @@ namespace AgentTouchFix
             try
             {
                 object e = __args[0];
+                // v6: feed the tooltip suppressor (cheap: timestamp writes only) for every event,
+                // not just the two we act on below.
+                TouchActivity.Note(e);
+
                 int action = Motion.ActionMasked(e);
                 if (action != 6 && action != 3) return true;
 

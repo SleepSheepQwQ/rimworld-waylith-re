@@ -3,7 +3,7 @@
   <name>AgentTouchFix</name>
   <author>SleepSheepQwQ</author>
   <packageId>sleepsheep.waylith.agenttouchfix</packageId>
-  <modVersion>1.3.0</modVersion>
+  <modVersion>1.4.0</modVersion>
   <supportedVersions>
     <li>1.7</li>
   </supportedVersions>
@@ -44,6 +44,23 @@
      go quiet again. The flag is read once, at startup.
    - Runtime failures (a tap or a gesture) are file-only; only a patch that fails to apply at
      startup reports once, in game.
+
+4) Snapping is hit tested (v6). A tapped map position is only snapped onto a Thing when the tap
+   really aimed at it: inside the thing's own footprint, or within 16 dp (and never more than half a
+   cell) of its projected screen position. A tap on empty ground next to an item now stays on the
+   empty cell, which is what terrain / spawn tools need. With nothing under the tap and a single
+   thing selected, the selected thing is used instead (tools that answer to the selection).
+   Switch (read once at startup), files/game/agenttouchfix.snap:
+     auto   (default, also used when the file is absent) - the hit test above
+     always - old behaviour: snap to the nearest candidate no matter how far the tap was
+     off - never snap; the exact tapped cell and position are used
+
+5) Tooltips no longer stick to the touch point (v6). The port parks the cursor on the last tap, so
+   Verse.TooltipHandler sees Mouse.IsOver(rect) forever and re-opens the hover text over the button
+   labels. TooltipHandler.TipRegion / TipRegionByKey are now skipped while a touch is in progress:
+   no tooltip for 1.5 s after a tap (and as long as the pointer stays parked on the tap point), but
+   holding the finger down for 600 ms or more shows the description on purpose. On desktop, or with
+   a real mouse being moved, nothing changes. A skipped tooltip never calls Event.current.Use().
 
 Everything is registered with AccessTools and fails soft: a missing target is recorded in the log
 file and the rest of the patches stay active. Nothing is patched permanently outside these
