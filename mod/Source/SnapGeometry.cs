@@ -131,20 +131,23 @@ namespace AgentTouchFix
         internal static Thing Resolve(object tapPos, float tapX, float tapZ, out string how, out bool candidatesEmpty)
         {
             how = null;
-            candidatesEmpty = true;
+            // Only "PortUI answered and named no Thing" counts as empty; a failed/unavailable
+            // candidate list must not silently fall back to whatever happens to be selected.
+            candidatesEmpty = false;
 
             IEnumerable items = Candidates(tapPos);
             if (items == null) return null;
 
             int mode = Mode;
             Thing found = null;
+            bool sawEntry = false;
             try
             {
                 foreach (object o in items)
                 {
+                    sawEntry = true;
                     Thing t = o as Thing;
                     if (t == null) continue;
-                    candidatesEmpty = false;
 
                     if (mode == Always)
                     {
@@ -167,6 +170,11 @@ namespace AgentTouchFix
                 Refl.Warn("candidate scan failed: " + e.Message);
                 return null;
             }
+
+            // Empty answer = PortUI knows of nothing around the tap -> the selection may stand in.
+            // A non-empty list whose entries all failed the hit test is a deliberate "not aimed at
+            // anything": keep the raw tap instead of hijacking it for the selected thing.
+            candidatesEmpty = !sawEntry;
             return found;
         }
 
