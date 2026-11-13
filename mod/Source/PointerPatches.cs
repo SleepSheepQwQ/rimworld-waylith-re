@@ -120,11 +120,28 @@ namespace AgentTouchFix
             if (_mCameraClear == null) Refl.Warn("TouchCamera.Clear not found - camera accumulators not cleared");
         }
 
-        private static object EngineOf(object controls)
+        internal static object EngineOf(object controls)
         {
             if (controls == null) return null;
             try { return _fEngineField?.GetValue(controls); }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// Diagnostic helper: the engine state as "Name/int" (or "?" when the field is missing).
+        /// Read only - used by the log lines, never to drive a decision.
+        /// </summary>
+        internal static string StateStr(object engine)
+        {
+            try
+            {
+                Resolve();
+                if (_fState == null || engine == null) return "?";
+                object v = _fState.GetValue(engine);
+                if (v == null) return "null";
+                return v + "/" + Convert.ToInt32(v);
+            }
+            catch { return "?"; }
         }
 
         private static void SetState(object engine, int value)
@@ -306,6 +323,7 @@ namespace AgentTouchFix
             try
             {
                 if (__instance == null) return;
+                string before = StateStr(__instance);
                 SetState(__instance, StateIdle);
                 SetBool(_fTwoMoved, __instance, false);
                 SetBool(_fTwoPan, __instance, false);
@@ -314,6 +332,7 @@ namespace AgentTouchFix
                 SetFloat(_fVy, __instance, 0f);
                 SetFloat(_fTwoDistance, __instance, 1f);
                 SetFloat(_fTwoStartDistance, __instance, 1f);
+                Refl.Info("SecondUp -> state=" + before + " (reset to " + StateStr(__instance) + ")");
             }
             catch (Exception e)
             {

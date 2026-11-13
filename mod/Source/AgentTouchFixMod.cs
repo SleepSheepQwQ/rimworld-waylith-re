@@ -193,6 +193,12 @@ namespace AgentTouchFix
             if (failed > 0) Refl.Err(summary);
             else if (skipped > 0) Refl.Warn(summary);
             else Refl.Info(summary);
+
+            // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
+            // these prefixes only append log lines. Runs last so the fix summary is never buried.
+            Refl.Info("DIAG BUILD v3-diagnostic (v1.1.0) - instrumentation active, behaviour unchanged");
+            try { Diag.Install(); }
+            catch (Exception e) { Refl.Err("diag install failed: " + e); }
         }
 
         private static MethodInfo MI(Type t, string name)

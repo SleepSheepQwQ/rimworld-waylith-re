@@ -178,3 +178,48 @@ dlls/Assembly-CSharp.dll dlls/0Harmony.dll dlls/UnityStubs.dll ...
 
 The workflow refuses to publish an artifact if any vanilla/game assembly ends up in
 `AgentTouchFix/Assemblies/`.
+
+## 5. v3-diagnostic build (version 1.1.0) — read-only instrumentation
+
+Purpose: find where "one finger drag turns into a zoom" comes from on the **classic** touch
+chain. This build changes **no behaviour**: every new patch is a prefix that only reads fields
+and appends one line to `files/game/agenttouchfix.log`. The seven fix patches are untouched,
+and `SecondUp_Postfix` keeps resetting state exactly as before (it just logs the pre-reset state).
+
+Live chain on this device: `mobile-controls.txt` contains `5` → `TouchPreferences.Options = 5`,
+`Modern = (5 & 2) != 0 = false`, so `RwHost.TouchControls.OnTouch` takes
+`if (flag) return classic.OnTouch(e);` — `RwHost.ClassicTouchControls.OnTouch` is the code that
+actually runs, and `Ports1de.TouchGestureEngine` is never driven on touch.
+
+| # | patch target | line written | throttle |
+|---|---|---|---|
+| 1 | `RwHost.GameCamera.Add(dx, dy, zoom)` | `Add dx=.. dy=.. zoom=.. frames: <f0> \| <f1> \| <f2> \| <f3>` | only when `|zoom| > 0.0001`; max 5 lines per second; `sup=N` when lines were dropped |
+| 2 | `RwHost.TouchCamera.Add` | `tcam.Add dx=.. dy=.. zoom=.. frames: <3 frames>` | same rule (separate budget) |
+| 3 | `RwHost.ClassicTouchControls.OnTouch` | `classic act=.. ptr=.. mode=.. x=.. y=.. [x1= y1=] pz=.. pd=.. pm=.. pui=..` | `ACTION_MOVE` max 1 per 100 ms; **every other action always**; MOVE with `ptr<2` while `mode` is `Pinch`/`Ignore` always (marked `STUCK-PINCH-SINGLE` / `STUCK-IGNORE-SINGLE`) |
+| 4 | `RwHost.TouchControls.OnTouch` | `modern act=.. ptr=.. state=Name/int classic=0/1 x=.. y=..` | `ACTION_MOVE` max 1 per 100 ms |
+| 5 | `Ports1de.TouchGestureEngine.SecondUp` | `SecondUp -> state=<pre> (reset to Idle/0)` | none (rare) |
+
+Install-time lines (once, at bootstrap):
+`diag: ClassicTouchControls resolved … mode=ok pinchZoom=ok …`, `diag: TouchControls resolved … engine=Ports1de.TouchGestureEngine classicMode=ok`,
+`diag: touch options=5 guide=1 modern=0 inertia=1`, `diag v3 summary: ok=4/4 skipped=0 failed=0`.
+If a field is missing the log says `MISSING`/`?` once and the line is still written — nothing throws.
+
+Two patch lines per zoom request is deliberate: `tcam.Add` is the entry every gesture branch calls,
+`Add` is `GameCamera`'s accumulator (`TouchCamera.add` is a delegate pointing at it, so a patched
+`GameCamera.Add` still catches it). Adjacent `tcam.Add` + `Add` with the same zoom = healthy
+forwarding; `Add` with no `tcam.Add` = something else called the accumulator.
+
+`ACTION_*` codes: 0 DOWN, 1 UP, 2 MOVE, 3 CANCEL, 5 POINTER_DOWN, 6 POINTER_UP.
+`ClassicTouchControls.Mode`: None/Pending/Held/Pan/Scroll/PreviewDrag/LeftDrag/Pinch/Ignore.
+
+How to read the report:
+
+* `zoom` non-zero on a `classic act=2 ptr=1 mode=Pinch` line → a single finger is being
+  processed by the pinch branch: `pointerCount` really is 2 for that event (check `x1/y1`) or
+  `mode` was left at `Pinch` after a finger lifted.
+* `mode=Pinch` + `ptr=1` with `pd` (pinchDistance) jumping between lines → the baseline is being
+  re-seeded with a one finger distance, so the next `num4 = log(num/pinchDistance)` is a big zoom.
+* `STUCK-IGNORE-SINGLE` after a two finger gesture → the dead-pointer residue
+  (`case 6` sets `mode = Ignore`, and `Ignore` has no branch in MOVE).
+* on the world map `GameCamera.WorldPrefix` turns zoom into `desiredAltitude` (world zoom), on a
+  map into `CameraDriver.desiredSize`; the stack in the `Add` line says which one.
