@@ -346,6 +346,39 @@ namespace AgentTouchFix
                 () => Refl.M(GovernorPatches.T(), "RenderBoundary"),
                 MI(typeof(GovernorPatches), "RenderBoundary_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
+            // v8 A/B: the host clears its mouse mirror on four lifecycle paths without forwarding a
+            // release (SurfaceDestroyed, OnConfigurationChanged, OnWindowFocusChanged(false) - and
+            // OnPause does not even clear it), and it pushes keys with no bookkeeping at all. Both
+            // are released from a prefix on the same four methods, before the original runs.
+            Add("RwHost.MainActivity.SurfaceDestroyed", () => InputReleasePatches.Target("SurfaceDestroyed", 1),
+                MI(typeof(InputReleasePatches), "SurfaceDestroyed_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            Add("RwHost.MainActivity.OnConfigurationChanged", () => InputReleasePatches.Target("OnConfigurationChanged", 1),
+                MI(typeof(InputReleasePatches), "OnConfigurationChanged_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            Add("RwHost.MainActivity.OnWindowFocusChanged", () => InputReleasePatches.Target("OnWindowFocusChanged", 1),
+                MI(typeof(InputReleasePatches), "OnWindowFocusChanged_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            Add("RwHost.MainActivity.OnPause", () => InputReleasePatches.Target("OnPause", 0),
+                MI(typeof(InputReleasePatches), "OnPause_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            Add("RwHost.MainActivity.OnKeyDown", () => InputReleasePatches.Target("OnKeyDown", 2),
+                MI(typeof(InputReleasePatches), "OnKeyDown_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            Add("RwHost.MainActivity.OnKeyUp", () => InputReleasePatches.Target("OnKeyUp", 2),
+                MI(typeof(InputReleasePatches), "OnKeyUp_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            // v8 C: ACTION_UP forces num = 0, i.e. it releases every held mouse button. Only the
+            // taken-over case (ACTION_UP whose ButtonState still names other buttons) skips the
+            // original; every other event runs it untouched.
+            Add("RwHost.MainActivity.MouseEvent", () => InputReleasePatches.MouseEventTarget(),
+                MI(typeof(InputReleasePatches), "MouseEvent_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            // v8 D: TRIM_MEMORY_UI_HIDDEN (20) was the only pressure level the port ignored.
+            Add("RwHost.AndroidMemoryAndGcGovernor.OnTrimMemory",
+                () => Refl.M(GovernorPatches.T(), "OnTrimMemory"),
+                MI(typeof(GovernorPatches), "OnTrimMemory_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
             // v7 C: the IME answer is dropped whenever the field's TextEditTarget changed geometry
             // between opening the editor and the callback (Chinese input hits this almost every
             // time). Postfix only: the exact match keeps priority, the relaxed one is same-window,
@@ -371,7 +404,7 @@ namespace AgentTouchFix
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v7-txtsel (1.5.0) - single texture trim per memory-pressure event + building double-tap select-all + same-window IME text recovery; v6 snapping (always/auto/off) and tooltip suppression unchanged");
+            Refl.Info("BUILD v8-inputrel (1.6.0) - mouse buttons and keys now get their release when the window loses focus / the surface goes away / the activity pauses, ACTION_UP no longer releases every held mouse button, TRIM_MEMORY_UI_HIDDEN(20) is answered like Background; v7 (single texture trim, building double-tap select-all, IME text recovery) unchanged");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
         }

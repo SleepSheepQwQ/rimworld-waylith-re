@@ -48,6 +48,19 @@ namespace AgentTouchFix
 
         private static Type _type;
 
+        // --- v8 D: TRIM_MEMORY_UI_HIDDEN ------------------------------------------------
+        // The UI-hidden callback (level 20) is the only trim level the port ignores, in both
+        // MainActivity.OnTrimMemory and here. 20 is not a small level: the activity is gone from
+        // the screen, which is exactly when Android expects the app to hand back everything it
+        // does not need (Background == 40 is already answered). Here it is answered the same way
+        // Background is - Request(1), i.e. the pending flag GameBoundary consumes - so the trim
+        // goes through the one existing channel with its existing throttles, instead of a second
+        // path with its own timing.
+        private const int LevelUiHidden = 20;
+        private const int UiHiddenWindowMs = 5000;
+        private static long _lastUiHiddenMs;     // 0 == never
+        private static MethodInfo _mRequest;     // public static void Request(int severity)
+
         /// <summary>RwHost.dll holds the copy that actually runs, so pin the assembly.</summary>
         internal static Type T()
         {
@@ -64,6 +77,7 @@ namespace AgentTouchFix
                 Type governor = T();
                 _fPending = Refl.F(governor, "pending");
                 _fRenderTrim = Refl.F(governor, "renderTrim");
+                _mRequest = Refl.M(governor, "Request");
             }
             catch { }
             if (_fPending == null || _fRenderTrim == null)
@@ -134,6 +148,50 @@ namespace AgentTouchFix
                 if (!_warned) { _warned = true; Refl.Warn("governor prefix failed (suppression off): " + e.Message); }
                 return true;
             }
+        }
+
+        /// <summary>
+        /// TRIM_MEMORY_UI_HIDDEN (20): the activity left the screen. The original method answers 15,
+        /// 80, 10, 5, 60 and 40 but returns for 20, so the release has to be requested here - the
+        /// same way 40 (Background) is, i.e. Request(1), which only sets the pending flag that
+        /// GameBoundary consumes. That keeps the one existing trim channel (and its 5 s / 30 s
+        /// throttles, and v7's single-release rule) instead of opening a second, differently timed one.
+        ///
+        /// Rate limited to one request per 5 s: the level can be delivered again while the process
+        /// sits in the cached state, and Request(1) alone would then keep asking for a trim that has
+        /// nothing left to release. The original method still runs (return true) - it is a no-op for
+        /// this level, and suppressing it for other levels is not this patch's business.
+        /// </summary>
+        internal static bool OnTrimMemory_Prefix(object[] __args)
+        {
+            try
+            {
+                if (__args == null || __args.Length < 1 || __args[0] == null) return true;
+
+                int level;
+                try { level = Convert.ToInt32(__args[0]); }
+                catch { return true; }
+                if (level != LevelUiHidden) return true;
+
+                long now = Environment.TickCount64;
+                long last = Volatile.Read(ref _lastUiHiddenMs);
+                if (last != 0 && now - last < UiHiddenWindowMs) return true;
+                Volatile.Write(ref _lastUiHiddenMs, now);
+
+                Resolve();
+                if (_mRequest == null)
+                {
+                    if (!_warned) { _warned = true; Refl.Warn("AndroidMemoryAndGcGovernor.Request not found - TRIM_MEMORY_UI_HIDDEN(20) is not answered"); }
+                    return true;
+                }
+                _mRequest.Invoke(null, new object[] { 1 });
+                Refl.Info("TRIM_MEMORY_UI_HIDDEN(20) treated as background: pending=1, engine textures release at the next game boundary");
+            }
+            catch (Exception e)
+            {
+                if (!_warned) { _warned = true; Refl.Warn("UI-hidden trim prefix failed: " + e.Message); }
+            }
+            return true;
         }
     }
 }
