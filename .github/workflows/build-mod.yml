@@ -128,8 +128,8 @@ jobs:
             || { echo "ERROR: DdsFallback probe target literal missing"; exit 1; }
           strings -el "$DLL" | grep -q 'Waylith.Rendering.TextureResidency' \
             || { echo "ERROR: residency probe target literal missing"; exit 1; }
-          strings -el "$DLL" | grep -q 'BUILD v1[1-4]-' \
-            || { echo "ERROR: build marker BUILD v11..v14 missing"; exit 1; }
+          strings -el "$DLL" | grep -q 'BUILD v1[1-5]-' \
+            || { echo "ERROR: build marker BUILD v11..v15 missing"; exit 1; }
           echo "tips / pick / snap / tex literals: OK"
 
           # 5) the texture probes are counters only: no call to any governor method may be added
