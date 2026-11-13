@@ -44,6 +44,21 @@ namespace AgentTouchFix
                 || n == "Wall" || n == "Table2x2c" || n == "DiningChair";
         }
 
+
+        /// <summary>Ambiguity-safe property read: 'CoreTexture' exists on both Texture2D and its base,
+        /// so GetProperty(name) throws AmbiguousMatchException. Walk the list and take the first.</summary>
+        private static object Prop(object obj, string name)
+        {
+            if (obj == null) return null;
+            try
+            {
+                foreach (PropertyInfo p in obj.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    if (p.Name == name && p.GetIndexParameters().Length == 0) return p.GetValue(obj, null);
+            }
+            catch { }
+            return null;
+        }
+
         private static void Dump()
         {
             Type tThing = Refl.T("Verse.ThingDef");
@@ -78,15 +93,14 @@ namespace AgentTouchFix
                 string core = "?";
                 if (uiIcon != null)
                 {
-                    PropertyInfo pc = uiIcon.GetType().GetProperty("CoreTexture", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    object ct = pc == null ? null : pc.GetValue(uiIcon, null);
+                    object ct = Prop(uiIcon, "CoreTexture");
                     if (ct == null) core = "null";
                     else
                     {
-                        object gpu = ct.GetType().GetProperty("GpuResource")?.GetValue(ct, null);
-                        object w = ct.GetType().GetProperty("width")?.GetValue(ct, null);
-                        object h = ct.GetType().GetProperty("height")?.GetValue(ct, null);
-                        object src = ct.GetType().GetProperty("SourcePath")?.GetValue(ct, null);
+                        object gpu = Prop(ct, "GpuResource");
+                        object w = Prop(ct, "width");
+                        object h = Prop(ct, "height");
+                        object src = Prop(ct, "SourcePath");
                         core = w + "x" + h + " gpu=" + (gpu != null) + " src=" + (src == null ? "null" : "yes");
                     }
                 }
@@ -96,9 +110,9 @@ namespace AgentTouchFix
                 if (iconMat == null) mat = "null";
                 else
                 {
-                    object sh = iconMat.GetType().GetProperty("shader")?.GetValue(iconMat, null);
-                    object texObj = iconMat.GetType().GetProperty("mainTexture")?.GetValue(iconMat, null);
-                    mat = "shader=" + (sh == null ? "null" : (sh.GetType().GetProperty("name")?.GetValue(sh, null) as string ?? "?"))
+                    object sh = Prop(iconMat, "shader");
+                    object texObj = Prop(iconMat, "mainTexture");
+                    mat = "shader=" + (sh == null ? "null" : (Prop(sh, "name") as string ?? "?"))
                         + " tex=" + (texObj == null ? "null" : texObj.GetType().Name);
                 }
 
