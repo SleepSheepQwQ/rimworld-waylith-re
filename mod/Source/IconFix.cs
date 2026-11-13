@@ -29,8 +29,8 @@ namespace AgentTouchFix
         private static int _warned;
 
         private static FieldInfo _fUiIcon, _fGraphic, _fDefName, _fMat;
-        private static bool _noMaterial = true;
-        private static bool _useCore = true;
+        private static bool _noMaterial = false;   // v23: shipped behaviour (material kept)
+        private static bool _useCore = false;      // v23: do NOT swap uiIcon to CoreTexture (draws garbage)
         private static int _matCleared;
         private static int _coreSwapped;
         private static MethodInfo _finder;          // ContentFinder<Texture2D>.Get(string, bool)
@@ -156,7 +156,7 @@ namespace AgentTouchFix
                 if (File.Exists(sw))
                 {
                     string v = (File.ReadAllText(sw) ?? "").Trim().ToLowerInvariant();
-                    _noMaterial = !(v.StartsWith("keep") || v == "off" || v == "0");
+                    _noMaterial = v.StartsWith("clear") || v == "1" || v.StartsWith("nomaterial");
                 }
                 Refl.Info("iconfix: uiIconMaterial " + (_noMaterial ? "cleared" : "kept") + ", uiIcon->CoreTexture " + (_useCore ? "on" : "off") + " (plain texture path)");
             }
