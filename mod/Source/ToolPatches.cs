@@ -42,6 +42,7 @@ namespace AgentTouchFix
         private static IntVec3 _overrideCell;        // what UI.MouseCell() reports during clickAction
         private static object _overrideMapPos;       // boxed UnityEngine.Vector3 for UI.MouseMapPosition()
         private static bool _snapWarned;
+        private static int _candFailures;
 
         internal static object CurTool
         {
@@ -200,8 +201,20 @@ namespace AgentTouchFix
             if (_mCandidates == null) return null;
 
             object list;
-            try { list = _mCandidates.Invoke(null, new object[] { tapPos }); }
-            catch { _mCandidates = null; return null; }
+            try
+            {
+                list = _mCandidates.Invoke(null, new object[] { tapPos });
+                _candFailures = 0;
+            }
+            catch (Exception e)
+            {
+                // A wrong signature must not flood the log or be retried forever: give up after
+                // three failures and keep the plain rounded-cell behaviour.
+                if (++_candFailures < 3) return null;
+                _mCandidates = null;
+                Refl.Warn("Candidates invoke failed " + _candFailures + "x - tap snapping disabled: " + e.Message);
+                return null;
+            }
 
             IEnumerable items = list as IEnumerable;
             if (items == null) return null;
