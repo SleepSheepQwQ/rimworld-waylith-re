@@ -14,6 +14,10 @@
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <DebugType>none</DebugType>
     <Deterministic>true</Deterministic>
+    <!-- .NET 8+ appends "+<git sha>" to AssemblyInformationalVersion, which made every commit
+         produce a different DLL (same size, different bytes) and invalidated the hashes recorded
+         in BUILD.md. The binary must depend on the source only. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Optimize>true</Optimize>
     <!-- referenced game assemblies are net10.0 too, they just carry no reference assembly -->
     <NoWarn>$(NoWarn);CS1701;CS1702;MSB3277;MSB3245</NoWarn>
