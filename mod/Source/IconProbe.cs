@@ -5,8 +5,6 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using HarmonyLib;
-using Verse;
-using UnityEngine;
 
 namespace AgentTouchFix
 {
@@ -89,13 +87,36 @@ namespace AgentTouchFix
 
             // v15b: ask ContentFinder directly - is the texture missing, or is the icon field unset?
             string[] paths = { "UI/Designators/Deconstruct", "UI/Commands/Mine", "UI/Commands/Attack", "UI/Commands/Cancel" };
+            MethodInfo finder = null;
+            try
+            {
+                Type texType = Refl.T("Waylith.Rendering.Texture2D") ?? Refl.T("UnityEngine.Texture2D");
+                Type open = Type.GetType("Verse.ContentFinder`1, Assembly-CSharp");
+                if (open != null && texType != null)
+                {
+                    Type closed = open.MakeGenericType(texType);
+                    finder = closed.GetMethod("Get", BindingFlags.Public | BindingFlags.Static, null,
+                        new[] { typeof(string), typeof(bool) }, null)
+                        ?? closed.GetMethod("Get", BindingFlags.Public | BindingFlags.Static);
+                }
+            }
+            catch (Exception e) { Refl.Warn("iconprobe: finder resolve: " + e.Message); }
+
             foreach (string p in paths)
             {
                 try
                 {
-                    Texture2D t = ContentFinder<Texture2D>.Get(p, false);
-                    Refl.Info("iconprobe: find " + p + " -> "
-                        + (t == null ? "NULL" : (t.width + "x" + t.height)));
+                    if (finder == null) { Refl.Info("iconprobe: find " + p + " -> finder unresolved"); break; }
+                    object[] args = finder.GetParameters().Length >= 2 ? new object[] { p, false } : new object[] { p };
+                    object t = finder.Invoke(null, args);
+                    string dims = "NULL";
+                    if (t != null)
+                    {
+                        object w = t.GetType().GetProperty("width")?.GetValue(t, null);
+                        object h = t.GetType().GetProperty("height")?.GetValue(t, null);
+                        dims = w + "x" + h;
+                    }
+                    Refl.Info("iconprobe: find " + p + " -> " + dims);
                 }
                 catch (Exception e) { Refl.Info("iconprobe: find " + p + " threw " + e.Message); }
             }
