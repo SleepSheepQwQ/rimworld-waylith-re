@@ -427,8 +427,11 @@ namespace AgentTouchFix
             // v11: the eviction gate. Installed last, after the read-only Evict counter, and it only
             // ever answers "do not run the original" for the methods its mode owns (see TexKeep).
             try { TexKeep.Install(); }
-            try { SampledReady.Install(); }
             catch (Exception e) { Refl.ErrOnce("texkeep install failed: " + e); }
+
+            // v13: force a not-yet-resident texture to upload before it is sampled (see SampledReady).
+            try { SampledReady.Install(); }
+            catch (Exception e) { Refl.ErrOnce("sampled install failed: " + e); }
 
         }
 
