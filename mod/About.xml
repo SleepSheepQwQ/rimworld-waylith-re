@@ -121,7 +121,7 @@
              method, unchanged.
    The switch touches only that one branch: it never rewrites arguments and never bypasses the
    original in the branch it does not own. Log: `pick mode=exact skipped-radius=N` (at most one line
-   per 2 s) plus the startup line `pick mode=<mode> (...)`.
+   per 2 s) plus the startup line `pick mode=&lt;mode&gt; (...)`.
    Independent of the developer-tool snapping in item 4: an armed tool still snaps onto the entity
    under the finger, which is what makes terrain and spawn tools usable.
 
@@ -139,7 +139,7 @@
      evicted, how often the 1x1 stand-in colour is handed out, and how often residency moves
      textures out or evicts the host-resident copies.
    Every 30 s one line is appended to files/game/agenttouchfix.log (file only, never Verse.Log):
-     tex: decode ok=N shift>0=N fail=N fallback=N evict=N offload=N budget=<MiB> limit=<px> hostevict=N
+     tex: decode ok=N shift>0=N fail=N fallback=N evict=N offload=N budget=&lt;MiB&gt; limit=&lt;px&gt; hostevict=N
    plus one detail line the first time a down-shifted plan appears and the first time a decode
    fails (format code, input size, shift, budget, limit). The patch summary line
    `tex: probes ok=.. skipped=.. failed=..` says whether the counters could be installed at all.
