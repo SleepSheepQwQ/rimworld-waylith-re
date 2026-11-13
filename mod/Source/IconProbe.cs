@@ -5,6 +5,8 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using HarmonyLib;
+using Verse;
+using UnityEngine;
 
 namespace AgentTouchFix
 {
@@ -84,6 +86,19 @@ namespace AgentTouchFix
             }
             Refl.Info("iconprobe: designators=" + totalDesignators + " sampled=" + dumped);
             Refl.Info(sb.ToString().TrimEnd());
+
+            // v15b: ask ContentFinder directly - is the texture missing, or is the icon field unset?
+            string[] paths = { "UI/Designators/Deconstruct", "UI/Commands/Mine", "UI/Commands/Attack", "UI/Commands/Cancel" };
+            foreach (string p in paths)
+            {
+                try
+                {
+                    Texture2D t = ContentFinder<Texture2D>.Get(p, false);
+                    Refl.Info("iconprobe: find " + p + " -> "
+                        + (t == null ? "NULL" : (t.width + "x" + t.height)));
+                }
+                catch (Exception e) { Refl.Info("iconprobe: find " + p + " threw " + e.Message); }
+            }
         }
 
         private static string Describe(object designator)
