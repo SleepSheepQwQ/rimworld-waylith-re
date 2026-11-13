@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>AgentTouchFix</name>
+  <author>SleepSheepQwQ</author>
+  <packageId>sleepsheep.waylith.agenttouchfix</packageId>
+  <modVersion>1.0.0</modVersion>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+  <description>Runtime Harmony fixes for the Android touch port (Waylith engine), no vanilla DLL is modified.
+
+1) Developer tools (LudeonTK DebugTools) work with touch.
+   The port turns every map tap into a synthetic selection (PortUI.MobileSelectionController.Tap)
+   and never produces the MouseDown that DebugTool.DebugToolOnGUI needs, so an armed tool never
+   fires and the tap is stolen by the selector.
+   - PortUI.MobileSelectionController.Tap is skipped while a tool is armed; the tool's clickAction
+     is invoked instead, with UI.MouseCell() pinned to the tapped cell.
+   - Long press cancels the armed tool (touch equivalent of the right mouse button).
+   - RimWorld.Selector.HandleMapClicks is skipped while a tool is armed (real mouse fallback) and a
+     half-open drag box is disarmed so selection can never "stick".
+   - LudeonTK.DebugTool.DebugToolOnGUI is suppressed on the frame a tool already fired through the
+     touch path, so a real mouse event cannot fire the same tool twice.
+
+2) Pointer no longer sticks after a two finger gesture, and a one finger drag no longer turns into a zoom.
+   - Ports1de.TouchGestureEngine.SecondUp leaves state = Ignore and no branch of Move()/Up() handles
+     Ignore, so the finger still on the screen emits nothing until it is lifted and pressed again.
+     The postfix forces state = Idle and drops the pinch baseline / inertia.
+   - RwHost.TouchControls.OnTouch: on ACTION_POINTER_UP / ACTION_CANCEL the engine and the GameCamera
+     accumulators are reset, and the remaining finger is re-armed as a pan (or the remaining two
+     fingers as a pinch) so the gesture continues instead of dying.
+   - Stale GameCamera pan/zoom accumulators are cleared at gesture end, which removes the
+     "leftover zoom applied on the next frame" effect.
+
+Everything is registered with AccessTools and fails soft: a missing target logs one red line
+([AgentTouchFix] ...) and the rest of the patches stay active. Nothing is patched permanently
+outside these six methods.
+
+Requires the mobile port (PortUI/RwHost present). Harmless on desktop RimWorld: the touch-only
+patches are simply skipped.</description>
+</ModMetaData>

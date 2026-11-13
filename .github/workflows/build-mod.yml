@@ -1,0 +1,62 @@
+name: build-mod
+
+# Builds the AgentTouchFix Harmony mod (no vanilla DLL is modified, no decompilation).
+# Reference assemblies live in dlls/ and are never shipped with the mod.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'mod/**'
+      - 'dlls/0Harmony.dll'
+      - 'dlls/Assembly-CSharp.dll'
+      - '.github/workflows/build-mod.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show reference assemblies
+        run: ls -l dlls
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: dotnet info
+        run: dotnet --info
+
+      - name: Build AgentTouchFix
+        run: dotnet build mod/AgentTouchFix.csproj -c Release -v minimal
+
+      - name: Stage mod folder
+        run: |
+          set -euo pipefail
+          OUT=dist/AgentTouchFix
+          rm -rf dist
+          mkdir -p "$OUT/Assemblies"
+          cp mod/About.xml "$OUT/About.xml"
+          cp mod/bin/Release/AgentTouchFix.dll "$OUT/Assemblies/AgentTouchFix.dll"
+          # sanity: the mod must never ship a vanilla assembly
+          if ls "$OUT/Assemblies" | grep -qiE 'Assembly-CSharp|RwHost|PortUI|0Harmony' ; then
+            echo "ERROR: vanilla/game assembly staged into the mod"; exit 1
+          fi
+          ls -lR "$OUT"
+
+      - name: Zip mod
+        run: |
+          set -euo pipefail
+          cd dist
+          zip -r9 AgentTouchFix.zip AgentTouchFix
+          unzip -l AgentTouchFix.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AgentTouchFix
+          path: dist/AgentTouchFix.zip
+          if-no-files-found: error
+
+      - name: Report dll size
+        run: stat -c '%n %s bytes' dist/AgentTouchFix/Assemblies/AgentTouchFix.dll

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>AgentTouchFix</AssemblyName>
+    <RootNamespace>AgentTouchFix</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <DebugType>none</DebugType>
+    <Deterministic>true</Deterministic>
+    <Optimize>true</Optimize>
+    <!-- referenced game assemblies are net10.0 too, they just carry no reference assembly -->
+    <NoWarn>$(NoWarn);CS1701;CS1702;MSB3277;MSB3245</NoWarn>
+  </PropertyGroup>
+
+  <!-- Reference assemblies are NOT shipped; the game loads them itself. -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(MSBuildThisFileDirectory)..\dlls\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+      <SpecificVersion>false</SpecificVersion>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(MSBuildThisFileDirectory)..\dlls\0Harmony.dll</HintPath>
+      <Private>false</Private>
+      <SpecificVersion>false</SpecificVersion>
+    </Reference>
+  </ItemGroup>
+
+</Project>
