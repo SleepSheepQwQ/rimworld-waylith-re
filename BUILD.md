@@ -1,0 +1,180 @@
+# AgentTouchFix — build notes
+
+Harmony fix mod for the RimWorld 1.7 Android port `com.ports1de.waylith` (Waylith engine, .NET 10).
+**No vanilla DLL is recompiled, patched on disk, or shipped.** Everything happens at runtime.
+
+| item | value |
+|---|---|
+| mod name / folder | `AgentTouchFix` (`Mods/AgentTouchFix`) |
+| packageId | `sleepsheep.waylith.agenttouchfix` |
+| version | 1.0.0 |
+| target framework | `net10.0` (same as `Assembly-CSharp.dll`, verified: `TargetFrameworkAttribute = .NETCoreApp,Version=v10.0`) |
+| mod DLL | `Assemblies/AgentTouchFix.dll`, **20,480 bytes** (md5 `f5983f9f63c5945608a84a9618ebefb4`) |
+| built by | GitHub Actions run **43440517642** (`.github/workflows/build-mod.yml`), `dotnet build -c Release` on `ubuntu-latest` with .NET SDK 10.0.x |
+| result | build **success**, 0 warnings, 0 errors |
+| artifact | `AgentTouchFix.zip` (10,591 B) → staged here as `~/.hermes/cache/scratch/agenttouchfix/AgentTouchFix.zip` |
+
+Zip layout (root = mod folder, ready for `deploy_agenttouchfix.sh`):
+
+```
+AgentTouchFix/About.xml
+AgentTouchFix/Assemblies/AgentTouchFix.dll
+```
+
+## 1. Compile-time references and where they came from
+
+| reference | size | source | shipped? |
+|---|---|---|---|
+| `Assembly-CSharp.dll` | 15,471,104 B | already in the repo `dlls/` (pulled from the installed game via `run-as`, 1.7 build; all patch targets live here: `Verse.UI`, `Verse.IntVec3`, `RimWorld.Selector`, `LudeonTK.*`, `Verse.Log`) | no (`<Private>false</Private>`) |
+| `0Harmony.dll` | 2,532,864 B | **NuGet `Lib.Harmony` 3.0.0-rc.3, `lib/net10.0/`** — pushed to `dlls/0Harmony.dll` in commit `86a1aa0` | no |
+| `UnityStubs.dll` | 964,096 B | the game's own copy, extracted earlier with `run-as`, pushed to `dlls/UnityStubs.dll` for the record | no |
+
+Notes on `0Harmony.dll`:
+
+* The game's `files/game/0Harmony.dll` is 2,573,312 B and reports `FileVersion 3.0.0.0`,
+  `ProductVersion 3.0.0.0-rc.3+3c0e32cd…`, `ProductName Harmony` — i.e. Harmony 3.0.0-rc.3, a
+  different TFM build of the same package. The NuGet `net10.0` build has the same assembly
+  identity (`0Harmony, Version=3.0.0.0`) which is what the CLR binds on at load time, so the
+  mod resolves against the already-loaded game copy.
+* Pulling the exact 2.5 MB file over `rish`/Shizuku was not possible reliably: rish splits large
+  stdout between fd1 and fd2 in a non-deterministic order (verified by md5 per 220 KB chunk —
+  no concatenation order reproduced the source bytes), so the fidelity-checked route was NuGet.
+* `UnityStubs.dll` is **not** referenced by the csproj: the mod deliberately contains **zero**
+  `UnityEngine` type references (verified: the built DLL has no `UnityEngine` assembly reference
+  and no `UnityEngine` string). `UnityEngine.Vector3` is read by field reflection, `Time.frameCount`
+  by property reflection, `MotionEvent` entirely by reflection (no `Mono.Android` reference).
+
+Assembly references of the produced DLL, asserted by the CI step
+`Verify no third-party assembly references` (fails the build otherwise):
+
+```
+assembly refs (metadata strings):
+0Harmony
+Assembly-CSharp
+System.Runtime
+reference check OK
+```
+
+i.e. **no** `PortUI`, `RwHost`, `Mono.Android`, `UnityEngine`, `Waylith` reference.
+
+### 1.1 Duplicate-type hazard (fixed in commit `00f335e`)
+
+`Ports1de.TouchGestureEngine` is compiled into **both** `RwHost.dll` and `PortUI.dll`
+(confirmed: `dec22/decompiled/{RwHost,PortUI}/Ports1de/TouchGestureEngine.cs`; the PortUI copy has
+no callers). `AccessTools.TypeByName` / `AppDomain` enumeration would return whichever copy is
+found first, and a `SecondUp` patch applied to the dead PortUI copy would be a silent no-op.
+
+Resolution order now used (`PointerPatches.PinEngine()`):
+
+1. `RwHost.TouchControls.engine` field type — this is by definition the live engine instance type;
+2. `Assembly.Load("RwHost").GetType("Ports1de.TouchGestureEngine", false)`;
+3. global `TypeByName` search, which logs a **warning** naming the assembly it fell back to.
+
+The same assembly-qualified preference (`Refl.TPrefer`) is used for every other target
+(`Assembly-CSharp` for `Verse.*`/`RimWorld.*`/`LudeonTK.*`, `PortUI` for `PortUI.*`,
+`RwHost` for `RwHost.TouchCamera`/`TouchControls`). Every successful patch logs the resolved
+declaring assembly, so a live run can be checked at a glance:
+
+```
+[AgentTouchFix] AgentTouchFix 1.0.0.0 bootstrapping (harmony sleepsheep.waylith.agenttouchfix)
+[AgentTouchFix] TouchGestureEngine pinned via TouchControls.engine -> assembly RwHost
+[AgentTouchFix] patched RimWorld.Selector.HandleMapClicks -> Assembly-CSharp!RimWorld.Selector.HandleMapClicks
+[AgentTouchFix] patched PortUI.MobileSelectionController.Tap -> PortUI!PortUI.MobileSelectionController.Tap
+...
+[AgentTouchFix] patch summary: ok=7 skipped=0 failed=0
+```
+
+### 1.2 Member shapes re-checked against the 1.7 decompile
+
+* `RimWorld.Selector.HandleMapClicks()` — exactly one declaration, public instance, no
+  arguments (the only other occurrence is the call site inside `SelectorOnGUI`).
+* `RimWorld.Selector.dragBox` — `public DragBox dragBox = new DragBox();` (field).
+* `RimWorld.DragBox.active` — `public bool active;` (field, read/write).
+* `LudeonTK.DebugTool.clickAction` — `public Action clickAction;` (field). `ClickActionOf()` now
+  reads the field first and falls back to a same-named readable **property** before giving up.
+
+## 2. Patch list (7 patches, all registered via `AccessTools`, each one fails soft)
+
+Bootstrap: `[StaticConstructorOnStartup] AgentTouchFix.Bootstrap` → `new Harmony("sleepsheep.waylith.agenttouchfix")`,
+`H.Patch(...)` per target inside try/catch, `Log.Message/Warning/Error` with the `[AgentTouchFix] `
+prefix, final line `patch summary: ok=N skipped=N failed=N`. A missing target is one red line and
+nothing else breaks.
+
+### A. Developer tools (LudeonTK `DebugTools.curTool`)
+
+| # | target | patch | what it does |
+|---|---|---|---|
+| 1 | `PortUI.MobileSelectionController.Tap(Vector3, bool longPress, bool selectOnly)` | prefix `(object[] __args) → bool` | **the actual fix.** If `DebugTools.curTool != null`: consume the tap (`return false`, selection never runs). `longPress == true` → `curTool = null` (touch right-click); otherwise invoke `tool.clickAction` with `UI.MouseCell()` pinned to the tapped cell. Tool stays armed (vanilla left-click semantics), so grid tools can be tapped repeatedly. |
+| 2 | `RimWorld.Selector.HandleMapClicks()` | prefix `(object __instance) → bool` | while a tool is armed, skip selector handling **and** disarm a half-open `dragBox` (`active = false`) so selection/drag cannot "stick". Real-mouse fallback path. |
+| 3 | `Verse.UI.MouseCell()` | prefix `(ref IntVec3 __result) → bool`, **priority High (700)** | only while a tool click is being invoked: return the tapped cell. High priority beats PortUI's own `MouseCell` prefix (designator preview / `ContextualActionToolbar.TryCell`), which otherwise rewrites the cell a dev tool reads. The `Vector3` → cell conversion uses the tapped position with banker's rounding (`Mathf.RoundToInt` semantics, the same as `UIToIntVec3`), not the truncating `IntVec3(Vector3)` ctor. |
+| 4 | `LudeonTK.DebugTool.DebugToolOnGUI()` | prefix `() → bool` | same-frame de-duplication: after a touch-fired tool, the frame's real `MouseDown` must not fire the same `clickAction` again. Frame clock = `UnityEngine.Time.frameCount` when resolvable, else `Environment.TickCount / 16`. |
+| 5 | `PortUI.QuickOrderWheel.Open(Vector3)` | prefix `(object[] __args) → bool` | long press on empty map normally opens the quick-order wheel *instead of* calling `Tap`; while a tool is armed the wheel is suppressed and the tool is cancelled instead. Without this the long-press cancel would be unreachable on empty ground. |
+
+### B. Stuck pointer / drag-becomes-zoom (RwHost `Ports1de`)
+
+| # | target | patch | what it does |
+|---|---|---|---|
+| 6 | `Ports1de.TouchGestureEngine.SecondUp(long)` | postfix `(object __instance)` | force `state = Idle`, `twoMoved = twoPan = false`, `vx = vy = 0`, `inertia = false`, `twoDistance = twoStartDistance = 1`. This is the dead state the original leaves behind (`SecondUp` sets `State.Ignore`, and neither `Move()` nor `Up()` has an `Ignore` branch). |
+| 7 | `RwHost.TouchControls.OnTouch(MotionEvent)` | prefix + postfix `(object __instance, object[] __args)` | prefix: on `ACTION_POINTER_UP (6)` and `ACTION_CANCEL (3)` reset the engine state and the pinch baseline and call `TouchCamera.Clear()` (zeroes `GameCamera.panX/panY/zoomLog`) **before** the original handler — this also runs ahead of the letter layer, which swallows `ACTION_POINTER_UP` (R10 in the findings) and can otherwise park the engine in `Two`/`Ignore` forever. Postfix: after `ACTION_POINTER_UP`, re-arm the fingers that are still down — 1 remaining finger → `engine.Down(x, y, eventTime, context)` then forced to `Pan` (never a stray `Tap` selection), 2 remaining → `engine.SecondDown(...)`. Net effect: the gesture continues on the remaining finger instead of dying until the next `ACTION_DOWN`. |
+
+Read access to `MotionEvent` is reflection only: `Action`, `ActionMasked`, `PointerCount`,
+`EventTime`, `GetX(int)`, `GetY(int)`; the lifted pointer index comes from `(Action >> 8) & 0xff`.
+
+All field/method lookups are cached after the first call; a missing member produces one
+`[AgentTouchFix]` warning and the dependent patch degrades to a no-op instead of throwing.
+
+## 3. Known risks / limitations
+
+1. **Not runtime-tested.** Nothing was installed on the device and `ModsConfig.xml` was not
+   touched (that is the deployer's job). The patch points are derived from the 0.0.22 decompiled
+   sources; the first in-game session should confirm in `Player.log`:
+   `TouchGestureEngine pinned via TouchControls.engine -> assembly RwHost`,
+   seven `patched …` lines each naming their assembly, and
+   `patch summary: ok=7 skipped=0 failed=0`. If the engine line says PortUI, or any line reads
+   `fell back to …`, the corresponding patch is mis-targeted and the log will say so.
+2. **Designator selected.** `MobileTouchInput.Process` returns early when
+   `Find.DesignatorManager.SelectedDesignator != null` (before it can reach `Tap`), so with a
+   build/designator tool active a dev tool tap does nothing. Select nothing (Esc) first.
+3. **Off-map taps** are filtered out by the port before `Tap` (`intVec.InBounds`), so clicking
+   outside the map with a tool armed is a no-op rather than "tool fires at an invalid cell".
+4. **`UI.MouseMapPosition()` is not overridden** (only `MouseCell()`), because returning a
+   `UnityEngine.Vector3` would require a compile-time UnityEngine reference. Tools that read
+   `UI.MouseMapPosition()` (rather than `UI.MouseCell()`) will use the cursor position that the
+   engine pushed on `ACTION_DOWN` — normally the same spot, but not guaranteed.
+5. **`MeasureTool` / `curMeasureTool`** is not handled (only `curTool`).
+6. **Classic touch mode** (`TouchPreferences.Modern == false`, `ClassicTouchControls`) is not
+   patched; the port defaults to modern. The tool fixes still work, the pointer fixes do not.
+7. **3+ finger sequences**: the port has no state branch for them at all (`action 5` with
+   `PointerCount > 2` calls `Cancel()`). We reset state so nothing stays stuck, but we do not
+   synthesise a pinch for 3 fingers; after one lifts, the remaining two are re-armed.
+8. **Native mouse-button slot**: the port's `glfwAndroidPush*` shim has a single-slot event
+   buffer, so a press/release pair can be collapsed natively (findings §0.4). That is outside
+   managed reach and is *not* fixed here.
+9. The NuGet `0Harmony` build differs from the shipped one byte-wise (same version/identity).
+   If the port ever ships a Harmony build with a different API, patches will fail loudly in the
+   log rather than silently.
+
+## 4. Reproduce / rebuild
+
+```bash
+# repo: SleepSheepQwQ/rimworld-waylith-re
+gh workflow run build-mod.yml -R SleepSheepQwQ/rimworld-waylith-re
+gh run list    -R SleepSheepQwQ/rimworld-waylith-re --workflow build-mod.yml --limit 1
+gh run download <run-id> -R SleepSheepQwQ/rimworld-waylith-re -n AgentTouchFix -D dl
+unzip -l dl/AgentTouchFix.zip
+```
+
+Repo layout:
+
+```
+.github/workflows/build-mod.yml
+mod/AgentTouchFix.csproj      # HintPath ..\dlls\Assembly-CSharp.dll, ..\dlls\0Harmony.dll, Private=false
+mod/About.xml
+mod/Source/AgentTouchFixMod.cs   # bootstrap + reflection helpers
+mod/Source/ToolPatches.cs        # A. developer tools
+mod/Source/PointerPatches.cs     # B. touch state machine
+dlls/Assembly-CSharp.dll dlls/0Harmony.dll dlls/UnityStubs.dll ...
+```
+
+The workflow refuses to publish an artifact if any vanilla/game assembly ends up in
+`AgentTouchFix/Assemblies/`.
