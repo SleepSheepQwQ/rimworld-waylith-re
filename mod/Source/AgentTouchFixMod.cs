@@ -415,7 +415,7 @@ namespace AgentTouchFix
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v14-noatlas (1.9.3-diag) - v10 behaviour kept in full (tips park/suppress/off, developer-tool tap snapping via files/game/agenttouchfix.snap, pick port/exact via files/game/agenttouchfix.pick, building double-tap select-all, IME text recovery, focus-loss mouse/key release, ACTION_UP per-button release, SecondUp reset, file-only 1 MB log, read-only texture counters every 30 s, NO memory/texture governor patch); NEW: files/game/agenttouchfix.texkeep (grace [default] / on / off) with files/game/agenttouchfix.texgrace (frames, default 900) and files/game/agenttouchfix.texsmall (bytes, default 1048576) - grace skips Texture2D.Evict for allocations up to texsmall bytes and for textures whose RenderFrameSerial - GpuResource.LastUseFrame is below the grace window, on short-circuits EvictWhenCached + DrainPendingEvictions, off patches no eviction method; logged as 'texkeep mode=grace grace=900 small=1.0MiB icons=N skipped=icon:N,hot:N,small:N evicted=N'; v14 can keep textures out of the static atlas (files/game/agenttouchfix.atlas, default off = no atlas baking) so icons draw directly; v13 patches Texture.EnsureSampledReady so a not-yet-resident texture is uploaded before it is sampled; v12 adds an OBJECT-IDENTITY whitelist of build-menu icons (DesignationCategoryDef.resolvedDesignators[].icon + Find.ReverseDesignatorDatabase.AllDesignators[].icon), refreshed every 10 s");
+            Refl.Info("BUILD v15-iconprobe (1.9.4-diag) - v10 behaviour kept in full (tips park/suppress/off, developer-tool tap snapping via files/game/agenttouchfix.snap, pick port/exact via files/game/agenttouchfix.pick, building double-tap select-all, IME text recovery, focus-loss mouse/key release, ACTION_UP per-button release, SecondUp reset, file-only 1 MB log, read-only texture counters every 30 s, NO memory/texture governor patch); NEW: files/game/agenttouchfix.texkeep (grace [default] / on / off) with files/game/agenttouchfix.texgrace (frames, default 900) and files/game/agenttouchfix.texsmall (bytes, default 1048576) - grace skips Texture2D.Evict for allocations up to texsmall bytes and for textures whose RenderFrameSerial - GpuResource.LastUseFrame is below the grace window, on short-circuits EvictWhenCached + DrainPendingEvictions, off patches no eviction method; logged as 'texkeep mode=grace grace=900 small=1.0MiB icons=N skipped=icon:N,hot:N,small:N evicted=N'; v14 can keep textures out of the static atlas (files/game/agenttouchfix.atlas, default off = no atlas baking) so icons draw directly; v13 patches Texture.EnsureSampledReady so a not-yet-resident texture is uploaded before it is sampled; v12 adds an OBJECT-IDENTITY whitelist of build-menu icons (DesignationCategoryDef.resolvedDesignators[].icon + Find.ReverseDesignatorDatabase.AllDesignators[].icon), refreshed every 10 s");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
 
@@ -436,6 +436,10 @@ namespace AgentTouchFix
             // v14: keep textures out of the static atlas (see AtlasOff). Default off = disabled.
             try { AtlasOff.Install(); }
             catch (Exception e) { Refl.ErrOnce("atlas install failed: " + e); }
+
+            // v15: one-shot read-only dump of the icons the build menu actually draws.
+            try { IconProbe.Install(); }
+            catch (Exception e) { Refl.ErrOnce("iconprobe install failed: " + e); }
 
         }
 
