@@ -83,5 +83,37 @@ jobs:
             || { echo "ERROR: engine patch target literal missing"; exit 1; }
           echo "reference check OK"
 
+      - name: Verify no governor / texture patch (v9)
+        run: |
+          set -euo pipefail
+          DLL=dist/AgentTouchFix/Assemblies/AgentTouchFix.dll
+
+          # 1) source level: the v7/v8 governor patches and their installer are gone for good.
+          if [ -e mod/Source/GovernorPatches.cs ]; then
+            echo "ERROR: mod/Source/GovernorPatches.cs is back"; exit 1
+          fi
+          if grep -rn 'GovernorPatches' mod/Source ; then
+            echo "ERROR: mod/Source still references GovernorPatches"; exit 1
+          fi
+
+          # 2) binary level: neither the ASCII nor the UTF-16 string heap may name a governor method
+          #    or a texture / memory entry point (.NET keeps literals in the #US heap as UTF-16).
+          for bad in AndroidMemoryAndGcGovernor GameBoundary RenderBoundary OnTrimMemory \
+                     RequestMemoryTrim PushTexture TextureCacheStore renderTrim GovernorPatches; do
+            if strings -a "$DLL" | grep -q "$bad" || strings -el "$DLL" | grep -q "$bad"; then
+              echo "ERROR: mod DLL carries '$bad' - a memory/texture patch is still installed"; exit 1
+            fi
+          done
+          echo "no governor / texture patch: OK"
+
+          # 3) the v9 tips switch and its log line must be in the binary.
+          strings -el "$DLL" | grep -q 'agenttouchfix.tips' \
+            || { echo "ERROR: tips switch path missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'tips mode=' \
+            || { echo "ERROR: tips log line missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'BUILD v9-notex' \
+            || { echo "ERROR: build marker BUILD v9-notex missing"; exit 1; }
+          echo "tips switch literals: OK"
+
       - name: Report dll size
         run: stat -c '%n %s bytes' dist/AgentTouchFix/Assemblies/AgentTouchFix.dll

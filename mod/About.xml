@@ -3,7 +3,7 @@
   <name>AgentTouchFix</name>
   <author>SleepSheepQwQ</author>
   <packageId>sleepsheep.waylith.agenttouchfix</packageId>
-  <modVersion>1.6.0</modVersion>
+  <modVersion>1.7.0</modVersion>
   <supportedVersions>
     <li>1.7</li>
   </supportedVersions>
@@ -37,7 +37,7 @@
 
 3) Silent by default (v5). Nothing is written to the in-game log window, so the game no longer
    pops the "there were errors / warnings" dialog.
-   - Every line goes to files/game/agenttouchfix.log (last 512 KB per session kept).
+   - Every line goes to files/game/agenttouchfix.log (rotated at 1 MB, one previous file kept).
    - Optional diagnostics: create an empty file files/game/agenttouchfix.diag next to it and
      restart. The touch/camera diagnostics are then re-enabled and INFO lines are additionally
      mirrored to the in-game console (Log.Message only - never Warning/Error). Delete the file to
@@ -55,30 +55,30 @@
      always - old behaviour: snap to the nearest candidate no matter how far the tap was
      off - never snap; the exact tapped cell and position are used
 
-5) Tooltips no longer stick to the touch point (v6). The port parks the cursor on the last tap, so
-   Verse.TooltipHandler sees Mouse.IsOver(rect) forever and re-opens the hover text over the button
-   labels. TooltipHandler.TipRegion / TipRegionByKey are now skipped while a touch is in progress:
-   no tooltip for 1.5 s after a tap (and as long as the pointer stays parked on the tap point), but
-   holding the finger down for 600 ms or more shows the description on purpose. On desktop, or with
-   a real mouse being moved, nothing changes. A skipped tooltip never calls Event.current.Use().
+5) Tooltips no longer stick to the touch point (v9). The real cause was the virtual cursor: the
+   port's tap path calls Click(), which pushes the cursor position onto the tapped button and never
+   moves it away, so Verse.TooltipHandler sees Mouse.IsOver(rect) forever, re-registers the tip every
+   frame and keeps the hover highlight on. After the last finger leaves the screen the cursor is now
+   pushed off screen (RwHost.Native.glfwAndroidPushCursorPos(-1, -1)), so the tip disappears on
+   release, like it does with a real mouse.
+   Switch (read once at startup), files/game/agenttouchfix.tips:
+     park     (default, also used when the file is absent) - move the cursor off screen on release,
+              plus the TipRegion suppression below as a second line of defence
+     suppress - only the TipRegion suppression, the cursor is never moved
+     off      - neither: the patches stay installed and return immediately
+   TooltipHandler.TipRegion / TipRegionByKey are skipped while the finger is the last input device
+   (up to 2 s after it left), a deliberate hold of 500 ms or more shows the description, and after
+   such a hold the tip stays allowed for another 800 ms so it does not blink. On desktop, or with a
+   real mouse being moved, nothing changes. A skipped tooltip never calls Event.current.Use().
 
-6) Textures stop blinking / turning grey after a memory pressure event (v7).
-   RwHost.AndroidMemoryAndGcGovernor answered one pressure event twice: GameBoundary released every
-   decoded texture staging buffer and set renderTrim = 1, then RenderBoundary released them again on
-   the next render frame - exactly when the queued uploads are consumed - so the buffers that were
-   decoded but not yet uploaded were evicted and the texture showed as a grey block until it was
-   decoded again. The render-side release is now skipped within 500 ms of a game-side one.
-   renderTrim is left set, so that trim is deferred to a later frame instead of being lost; pause,
-   surface and device-loss paths are untouched.
-
-7) Double tapping a building selects every one of that kind on screen (v7).
+6) Double tapping a building selects every one of that kind on screen (v7).
    PortUI.MobileSelectionController.Tap only had a multi-select branch for ThingCategory.Item, so a
    double tap on a wall or a workbench just re-selected the single building. A second tap on the same
    building within 400 ms is now handled by the mod: it pins UI.MouseCell()/UI.MouseMapPosition() to
    the building and calls the vanilla Selector.SelectAllMatchingObjectUnderMouseOnScreen(), which is
    what a desktop double click does. The current selection is not cleared first.
 
-8) Text typed with the Android keyboard is no longer dropped, which is what made Chinese input look
+7) Text typed with the Android keyboard is no longer dropped, which is what made Chinese input look
    broken (v7). Ports1de.TextEditMailbox.TryTake() compared the whole TextEditTarget - window id,
    keyboard control id and the field rect - so any layout change between opening the editor and the
    IME answering (a scrolled window, a re-laid-out dialog, the keyboard resizing the screen) threw
@@ -86,7 +86,7 @@
    instead: exactly once, and only if it has not expired. Both sides must report the same window id,
    and when there is no window at all (id -1) the keyboard control id has to match as well.
 
-9) Mouse buttons and keys are released when the app loses the input device (v8).
+8) Mouse buttons and keys are released when the app loses the input device (v8).
    The host forwards input to the engine and keeps its own mirror of what is held, but it clears
    that mirror on surface destroy, configuration change and focus loss without forwarding a
    release - and OnPause does not even clear it - so the engine kept a button pressed whose
@@ -98,18 +98,16 @@
    and the missing releases are sent from the same four lifecycle methods. KEYCODE_BACK is not
    tracked: it maps to Escape and OnBackPressed already sends its own press+release pair.
 
-10) Lifting one mouse button no longer releases the others (v8).
+9) Lifting one mouse button no longer releases the others (v8).
    RwHost clears every held button whenever an ACTION_UP arrives. On devices that report the still
    held buttons in that event, a button the player never released was let go, and the following
    move event pressed it again - a phantom click / a broken drag. Now only the button that actually
    went up is released, exactly as the port already does for a second button on a pointer-up; the
    ordinary single button release is handled by the unmodified game code.
 
-11) Memory is now handed back when the app goes to the background (v8).
-   TRIM_MEMORY_UI_HIDDEN (20) was the only pressure level the port ignored, even though it is the
-   one Android sends when the activity leaves the screen. It is now answered the same way as
-   TRIM_MEMORY_BACKGROUND (40): the texture buffers are released at the next game boundary, at most
-   once every 5 seconds.
+Nothing under RwHost.AndroidMemoryAndGcGovernor is patched, and no texture or memory path is touched
+(v9): the grey / flickering / scrambled textures came from the port itself (quality tier falling to
+Economy, a 32 MiB decoded-texture budget, BC sampling through software decode), not from the mod.
 
 Everything is registered with AccessTools and fails soft: a missing target is recorded in the log
 file and the rest of the patches stay active. Nothing is patched permanently outside these

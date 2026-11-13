@@ -7,12 +7,12 @@ Harmony fix mod for the RimWorld 1.7 Android port `com.ports1de.waylith` (Waylit
 |---|---|
 | mod name / folder | `AgentTouchFix` (`Mods/AgentTouchFix`) |
 | packageId | `sleepsheep.waylith.agenttouchfix` |
-| version | 1.4.0 (this file's section 8) |
+| version | 1.7.0 (this file's section 11) |
 | target framework | `net10.0` (same as `Assembly-CSharp.dll`, verified: `TargetFrameworkAttribute = .NETCoreApp,Version=v10.0`) |
-| mod DLL (v6) | `Assemblies/AgentTouchFix.dll`, **48,128 bytes** (md5 `ffc51b6cf1f4bb69d306640bc08c374f`); v1.0.0 was 20,480 B |
-| built by | GitHub Actions run **43458414120** (v6; the v1.0.0 build was 43440517642) (`.github/workflows/build-mod.yml`), `dotnet build -c Release` on `ubuntu-latest` with .NET SDK 10.0.x |
+| mod DLL (v9) | `Assemblies/AgentTouchFix.dll` — see §11.4 (v6 was 48,128 B / md5 `ffc51b6cf1f4bb69d306640bc08c374f`) |
+| built by | GitHub Actions (`.github/workflows/build-mod.yml`), `dotnet build -c Release` on `ubuntu-latest` with .NET SDK 10.0.x; run id per version in §11.4 |
 | result | build **success**, 0 warnings, 0 errors |
-| artifact | `AgentTouchFix.zip` (10,591 B) → staged here as `~/.hermes/cache/scratch/agenttouchfix/AgentTouchFix.zip` |
+| artifact | `AgentTouchFix.zip` → staged under `~/.hermes/cache/scratch/agenttouchfix/v9/` |
 
 Zip layout (root = mod folder, ready for `deploy_agenttouchfix.sh`):
 
@@ -432,6 +432,10 @@ fixes and the file-only logging contract are byte-for-byte the same code paths.
 
 ### 9.1 A — a single pressure event was answered twice
 
+> **Removed in v9 (`1.7.0`, §11): this patch is gone.** The whole `GovernorPatches` file and its
+> three install points (`GameBoundary`, `RenderBoundary`, `OnTrimMemory`) were deleted, and v9 must
+> never patch a governor method or call a texture entry point again. Kept below as history only.
+
 ```
 GameBoundary()      [game thread, per frame via AppContext "Ports1de.MemoryPressureAtFrame"]
     if (pending == 0) return;
@@ -660,6 +664,9 @@ as the host would). The old behaviour in that same situation was to release a bu
 still held, which is the worse failure.
 
 ### 10.4 D — `TRIM_MEMORY_UI_HIDDEN` (20) was the one level nobody answered
+
+> **Removed in v9 (`1.7.0`, §11): this patch is gone.** No governor method is patched any more, and
+> `Request(1)` / `RequestMemoryTrim` are not called from the mod. Kept below as history only.
 
 `AndroidMemoryAndGcGovernor.OnTrimMemory` (`:46-68`) answers 15/80 with severity 2 and 10/5/60/40
 with severity 1; level 20 (`TrimMemory.UiHidden`, "the activity left the screen") falls through both

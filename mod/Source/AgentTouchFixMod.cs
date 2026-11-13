@@ -298,6 +298,9 @@ namespace AgentTouchFix
             // v6: the snap aggressiveness switch (always / auto / off), read once, same folder.
             SnapGeometry.ReadMode();
 
+            // v9: the tooltip switch (park / suppress / off), read once, same folder.
+            TipMode.ReadMode();
+
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
             Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
@@ -329,22 +332,18 @@ namespace AgentTouchFix
                 -1, ref ok, ref skipped, ref failed);
 
             // v6: the classic chain (mobile-controls.txt without bit 2) never reaches the patch
-            // above, so the tooltip suppressor would never see a touch there. Timestamp only.
+            // above, so the tooltip suppressor would never see a touch there. v9 also parks the
+            // cursor from the postfix, because the classic chain pushes its own Click() last.
             Add("RwHost.ClassicTouchControls.OnTouch", () => Refl.M(Refl.TPrefer("RwHost", "RwHost.ClassicTouchControls"), "OnTouch"),
-                MI(typeof(TooltipPatches), "Touch_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+                MI(typeof(TooltipPatches), "Touch_Prefix"), MI(typeof(TooltipPatches), "Touch_Postfix"),
+                -1, ref ok, ref skipped, ref failed);
 
-            // v7 A: a memory-pressure event used to release the decoded texture staging buffers
-            // twice (game boundary + the next render boundary), and the second one landed on the
-            // frame that consumes the uploads -> grey / flickering textures. The render side is
-            // suppressed for 500 ms after a real game-side release; renderTrim keeps its value, so
-            // the render trim is deferred, never lost.
-            Add("RwHost.AndroidMemoryAndGcGovernor.GameBoundary",
-                () => Refl.M(GovernorPatches.T(), "GameBoundary"),
-                MI(typeof(GovernorPatches), "GameBoundary_Prefix"), null, -1, ref ok, ref skipped, ref failed);
-
-            Add("RwHost.AndroidMemoryAndGcGovernor.RenderBoundary",
-                () => Refl.M(GovernorPatches.T(), "RenderBoundary"),
-                MI(typeof(GovernorPatches), "RenderBoundary_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+            // v9: NO AndroidMemoryAndGcGovernor patch of any kind. v7 skipped the second of the two
+            // texture releases a pressure event produced and v8 answered TRIM_MEMORY_UI_HIDDEN(20)
+            // with Request(1); both touched the texture/memory path and are gone for good. The grey /
+            // flickering / scrambled textures were caused by the port itself (quality tier down to
+            // Economy, a 32 MiB decoded-texture budget, BC sampling by software decode), so nothing
+            // here may call RequestMemoryTrim, PushTexture or any governor method again.
 
             // v8 A/B: the host clears its mouse mirror on four lifecycle paths without forwarding a
             // release (SurfaceDestroyed, OnConfigurationChanged, OnWindowFocusChanged(false) - and
@@ -374,11 +373,6 @@ namespace AgentTouchFix
             Add("RwHost.MainActivity.MouseEvent", () => InputReleasePatches.MouseEventTarget(),
                 MI(typeof(InputReleasePatches), "MouseEvent_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
-            // v8 D: TRIM_MEMORY_UI_HIDDEN (20) was the only pressure level the port ignored.
-            Add("RwHost.AndroidMemoryAndGcGovernor.OnTrimMemory",
-                () => Refl.M(GovernorPatches.T(), "OnTrimMemory"),
-                MI(typeof(GovernorPatches), "OnTrimMemory_Prefix"), null, -1, ref ok, ref skipped, ref failed);
-
             // v7 C: the IME answer is dropped whenever the field's TextEditTarget changed geometry
             // between opening the editor and the callback (Chinese input hits this almost every
             // time). Postfix only: the exact match keeps priority, the relaxed one is same-window,
@@ -404,7 +398,7 @@ namespace AgentTouchFix
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v8-inputrel (1.6.0) - mouse buttons and keys now get their release when the window loses focus / the surface goes away / the activity pauses, ACTION_UP no longer releases every held mouse button, TRIM_MEMORY_UI_HIDDEN(20) is answered like Background; v7 (single texture trim, building double-tap select-all, IME text recovery) unchanged");
+            Refl.Info("BUILD v9-notex (1.7.0) - no memory / texture governor patch of any kind (the v7 render-trim skip and the v8 UI-hidden trim answer are removed); tooltips are switchable via files/game/agenttouchfix.tips (park [default, cursor pushed off screen after the last finger up] / suppress / off) with a 500 ms hold allowance and an 800 ms post-release allowance; everything else from v8 (tap snapping, building double-tap select-all, IME text recovery, focus-loss mouse/key release, ACTION_UP per-button release, SecondUp reset, file-only 1 MB log) is unchanged");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
         }

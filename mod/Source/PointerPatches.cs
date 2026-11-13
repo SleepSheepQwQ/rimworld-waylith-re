@@ -275,6 +275,12 @@ namespace AgentTouchFix
             try
             {
                 object e = __args[0];
+
+                // v9 park: the original handler has already pushed the click at the tap point; when
+                // the last finger is gone, move the virtual cursor off screen so the widget under it
+                // stops reporting Mouse.IsOver(rect) (that is what kept the tooltip glued on).
+                CursorPark.OnGestureEvent(e);
+
                 if (Motion.ActionMasked(e) != 6) return;
 
                 object engine = EngineOf(__instance);
