@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -90,6 +92,20 @@ namespace AgentTouchFix
         private static int _evicted;                    // grace: evictions let through
         private static int _queueBlocked;               // on: EvictWhenCached calls answered false
         private static int _drainBlocked;               // on: DrainPendingEvictions calls answered false
+
+        // ---- v12: object-identity whitelist of UI icons (architect categories + reverse designators)
+        private static readonly HashSet<object> _uiIcons = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        private static long _iconsRefreshMs = -100000L;
+        private static int _iconCount;
+        private static int _skipIcon;                   // grace: suppressed because the texture is a UI icon
+        private static int _iconWarned;
+
+        private static Type _tCatDef;
+        private static Type _tRevDb;
+        private static Type _tFind;
+        private static FieldInfo _fResolved;            // DesignationCategoryDef.resolvedDesignators
+        private static PropertyInfo _pAllDesignators;   // ReverseDesignatorDatabase.AllDesignators
+        private static PropertyInfo _pRevDb;            // Find.ReverseDesignatorDatabase
 
         private static long _lastLogMs = -100000L;
         private static int _warnedMeasure;              // 0 = the notice is still due
@@ -230,6 +246,105 @@ namespace AgentTouchFix
             }
         }
 
+        // ================================================================ v12 icon whitelist
+
+        /// <summary>
+        /// Builds the identity set of textures that the build menu actually draws: every
+        /// DesignationCategoryDef.resolvedDesignators[i].icon plus every
+        /// Find.ReverseDesignatorDatabase.AllDesignators[i].icon. Refreshed at most every 10 s,
+        /// never throws, and an empty set simply means "no icon is pinned".
+        /// </summary>
+        private static void RefreshUiIcons()
+        {
+            long now;
+            try { now = Environment.TickCount64; } catch { now = 0L; }
+            if (now - _iconsRefreshMs < 10000L) return;
+            _iconsRefreshMs = now;
+            try
+            {
+                if (_pIconInitNeeded())
+                {
+                    _tCatDef = Refl.T("Verse.DesignationCategoryDef");
+                    _tRevDb = Refl.T("Verse.ReverseDesignatorDatabase");
+                    _tFind = Refl.T("Verse.Find");
+                    if (_tCatDef != null) _fResolved = _tCatDef.GetField("resolvedDesignators", BindingFlags.Public | BindingFlags.Instance);
+                    if (_tRevDb != null) _pAllDesignators = _tRevDb.GetProperty("AllDesignators", BindingFlags.Public | BindingFlags.Instance);
+                    if (_tFind != null) _pRevDb = _tFind.GetProperty("ReverseDesignatorDatabase", BindingFlags.Public | BindingFlags.Static);
+                    if (_tCatDef == null || _pAllDesignators == null || _pRevDb == null)
+                    {
+                        if (Interlocked.Exchange(ref _iconWarned, 1) == 0)
+                            Refl.Warn("texkeep icons: game types not resolvable - icon whitelist disabled");
+                        return;
+                    }
+                }
+
+                if (_fResolved != null)
+                {
+                    IEnumerable cats = DefsOf(_tCatDef);
+                    if (cats != null)
+                    {
+                        foreach (object cat in cats)
+                        {
+                            if (cat == null) continue;
+                            try { AddIcons(_fResolved.GetValue(cat)); } catch { }
+                        }
+                    }
+                }
+
+                try
+                {
+                    object db = _pRevDb.GetValue(null, null);
+                    if (db != null) AddIcons(_pAllDesignators.GetValue(db, null));
+                }
+                catch { }
+
+                _iconCount = _uiIcons.Count;
+            }
+            catch (Exception e)
+            {
+                if (Interlocked.Exchange(ref _iconWarned, 1) == 0)
+                    Refl.Warn("texkeep icons: refresh failed: " + e.Message);
+            }
+        }
+
+        private static bool _pIconInitNeeded()
+        {
+            return _pRevDb == null;
+        }
+
+        private static IEnumerable DefsOf(Type defType)
+        {
+            try
+            {
+                Type db = Type.GetType("Verse.DefDatabase`1, Assembly-CSharp");
+                if (db == null || defType == null) return null;
+                Type closed = db.MakeGenericType(defType);
+                PropertyInfo p = closed.GetProperty("AllDefsListForReading", BindingFlags.Public | BindingFlags.Static);
+                if (p == null) return null;
+                return p.GetValue(null, null) as IEnumerable;
+            }
+            catch { return null; }
+        }
+
+        private static void AddIcons(object list)
+        {
+            IEnumerable e = list as IEnumerable;
+            if (e == null) return;
+            foreach (object d in e)
+            {
+                if (d == null) continue;
+                if (_uiIcons.Count > 200000) return;
+                try
+                {
+                    PropertyInfo pi = d.GetType().GetProperty("icon", BindingFlags.Public | BindingFlags.Instance);
+                    if (pi == null) continue;
+                    object tex = pi.GetValue(d, null);
+                    if (tex != null) _uiIcons.Add(tex);
+                }
+                catch { }
+            }
+        }
+
         // ================================================================ grace: Texture2D.Evict
 
         /// <summary>
@@ -250,6 +365,15 @@ namespace AgentTouchFix
             {
                 object alloc = (_fGpuResource == null || __instance == null) ? null : _fGpuResource.GetValue(__instance);
                 if (alloc == null) return true;                  // nothing to free: the original no-ops
+
+                // 0) UI icons (build menu categories + reverse designators) are pinned by identity
+                RefreshUiIcons();
+                if (_uiIcons.Count > 0 && _uiIcons.Contains(__instance))
+                {
+                    Interlocked.Increment(ref _skipIcon);
+                    LogThrottled();
+                    return false;
+                }
 
                 // 1) small textures are never evicted (they are cheap to keep, pointless to reload)
                 long bytes = ReadAllocated(alloc);
@@ -382,7 +506,8 @@ namespace AgentTouchFix
             Refl.Info("texkeep mode=" + ModeName(_mode)
                 + " grace=" + (_mode == ModeGrace ? _grace : 0)
                 + " small=" + (_mode == ModeGrace ? SmallName() : "off")
-                + " skipped=hot:" + Volatile.Read(ref _skipHot) + ",small:" + Volatile.Read(ref _skipSmall)
+                + " icons=" + _iconCount
+                + " skipped=icon:" + Volatile.Read(ref _skipIcon) + ",hot:" + Volatile.Read(ref _skipHot) + ",small:" + Volatile.Read(ref _skipSmall)
                 + " evicted=" + Volatile.Read(ref _evicted)
                 + (_mode == ModeOn
                     ? " queue-blocked=" + Volatile.Read(ref _queueBlocked)
