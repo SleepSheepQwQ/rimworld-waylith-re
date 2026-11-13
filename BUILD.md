@@ -7,12 +7,12 @@ Harmony fix mod for the RimWorld 1.7 Android port `com.ports1de.waylith` (Waylit
 |---|---|
 | mod name / folder | `AgentTouchFix` (`Mods/AgentTouchFix`) |
 | packageId | `sleepsheep.waylith.agenttouchfix` |
-| version | 1.7.0 (this file's section 11) |
+| version | 1.8.0 (diagnostic build, this file's section 12; v9 was 1.7.0, §11) |
 | target framework | `net10.0` (same as `Assembly-CSharp.dll`, verified: `TargetFrameworkAttribute = .NETCoreApp,Version=v10.0`) |
-| mod DLL (v9) | `Assemblies/AgentTouchFix.dll` — see §11.4 (v6 was 48,128 B / md5 `ffc51b6cf1f4bb69d306640bc08c374f`) |
-| built by | GitHub Actions (`.github/workflows/build-mod.yml`), `dotnet build -c Release` on `ubuntu-latest` with .NET SDK 10.0.x; run id per version in §11.4 |
+| mod DLL (v10) | `Assemblies/AgentTouchFix.dll` — 80,896 B, md5 `a553366eb031a56209e76e8b2b7e83f4`, see §12.5 (v9 was 68,096 B, §11.4) |
+| built by | GitHub Actions (`.github/workflows/build-mod.yml`), `dotnet build -c Release` on `ubuntu-latest` with .NET SDK 10.0.x; run id per version in §12.5 |
 | result | build **success**, 0 warnings, 0 errors |
-| artifact | `AgentTouchFix.zip` → staged under `~/.hermes/cache/scratch/agenttouchfix/v9/` |
+| artifact | `AgentTouchFix.zip` (36,267 B) → staged under `~/.hermes/cache/scratch/agenttouchfix/v10/` |
 
 Zip layout (root = mod folder, ready for `deploy_agenttouchfix.sh`):
 
@@ -970,3 +970,43 @@ records what could be installed.
 | convert | a by-name postfix sees both `out` values *and* leaves them intact for the caller; it also prints what the `__args` variant does to them (caller sees `null` / `0`), so the rule above is reproducible |
 | pick | a generic prefix closed over the position struct can replace `List<object>` and skip the original, and reads the boxed position correctly |
 | evict | a parameterless prefix on an instance method counts without disturbing the body |
+
+### 12.5 Verification and build (v10)
+
+* CI run **43473299775** (`5f1fe29`), `dotnet build -c Release`: **0 warnings, 0 errors**;
+  `reference check OK`, `no governor / texture patch: OK`, `tips / pick / snap / tex literals: OK`,
+  `texture probes are read-only: OK`.
+* `tests/HarmonyProbe` (runs before the build) printed, in this order: `OVERLOAD PROBE OK`,
+  `SPAN/PLAN PROBE OK` (`verified: out plan (object) w=64 h=32 shift=2`), `CONVERT PROBE OK`
+  (`verified: by-name postfix reads both out values and the caller keeps them (used=4)` plus
+  `info: __args postfix on out parameters -> caller sees converted=null used=0`), `PICK PROBE OK`,
+  `EVICT PROBE OK`, `PROBE OK`. Two build failures before this one are part of the record: the
+  `__args` postfix was replaced by by-name binding after the probe showed it clobbers `out` values,
+  and `IntVec3.InBounds(map)` was replaced by an explicit bounds comparison after the compiler bound
+  the extension method to its `Vector3` overload (which would have forced a UnityStubs reference).
+* `Assemblies/AgentTouchFix.dll` **80,896 bytes**, md5 `a553366eb031a56209e76e8b2b7e83f4`
+  (sha256 `e029d108bba5aa2baba5a722d934a15cb63e0aabe3164d265ead06038bbe7371`); v9 was 68,096 B.
+  Assembly version 1.8.0.0, informational version `1.8.0-diag`.
+* artifact `AgentTouchFix.zip` **36,267 bytes**, md5 `ff84b900ff7805fdf5e678a720b57e08`, staged at
+  `~/.hermes/cache/scratch/agenttouchfix/v10/AgentTouchFix.zip` and unzipped next to it
+  (`v10/AgentTouchFix/About.xml` + `v10/AgentTouchFix/Assemblies/AgentTouchFix.dll`).
+* independent of CI (Python `dnfile` 0.18.0 + byte scanners over the shipped DLL): assembly references
+  are exactly `0Harmony`, `Assembly-CSharp`, `System.Collections`, `System.Runtime`,
+  `System.Threading` — no `RwHost` / `PortUI` / `UnityEngine` / `UnityStubs` / `Waylith` /
+  `Mono.Android`. The governor strings (`AndroidMemoryAndGcGovernor`, `GameBoundary`,
+  `RenderBoundary`, `OnTrimMemory`, `RequestMemoryTrim`, `PushTexture`, `TextureCacheStore`,
+  `renderTrim`, `GovernorPatches`) appear **0** times in either heap, and the literals
+  `BUILD v10-texprobe`, `agenttouchfix.pick`, `pick mode=exact skipped-radius=`, `tex: decode ok=`,
+  `agenttouchfix.snap`, `agenttouchfix.tips`, `tips mode=`, `Ports1de.DdsFallback`,
+  `Waylith.Rendering.TextureResidency` are all present.
+* patch methods present in the binary with the intended shape: `TexProbe.TryPlan_Prefix(budget,
+  maxDimension)`, `TexProbe.TryPlan_Postfix(__result, plan)`, `TexProbe.TryConvert_Postfix(__result,
+  input, length, budget, converted, used, maxDimension)`, the four parameterless counting prefixes,
+  and `PickMode.Candidates_Prefix<T>(position, __result)`.
+* **not deployed and not run in the game** (as instructed); `ModsConfig.xml` was not touched.
+  First gameplay check with no switch files (= `snap auto`, `pick port`, `tips park`): tapping empty
+  ground must behave exactly like v9, and the log must show `pick mode=port (...)`,
+  `tex: probes ok=7 skipped=0 failed=0 planpostfix=on` and one `tex: decode ok=...` line every 30 s.
+  Then write `exact` into `files/game/agenttouchfix.pick`, restart, and confirm a tap on empty ground
+  stays on that cell while a tap on an item/pawn still selects it (`pick mode=exact skipped-radius=N`
+  grows only on the empty-ground taps).
