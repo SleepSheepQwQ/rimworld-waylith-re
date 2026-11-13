@@ -33,7 +33,7 @@
 
 Everything is registered with AccessTools and fails soft: a missing target logs one red line
 ([AgentTouchFix] ...) and the rest of the patches stay active. Nothing is patched permanently
-outside these six methods.
+outside these seven methods.
 
 Requires the mobile port (PortUI/RwHost present). Harmless on desktop RimWorld: the touch-only
 patches are simply skipped.</description>

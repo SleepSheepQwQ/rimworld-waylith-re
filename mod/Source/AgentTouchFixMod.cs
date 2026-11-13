@@ -133,6 +133,9 @@ namespace AgentTouchFix
             Add("Verse.UI.MouseCell", () => Refl.M(Refl.T("Verse.UI"), "MouseCell"),
                 MI(typeof(ToolPatches), "MouseCell_Prefix"), null, 700, ref ok, ref skipped, ref failed);
 
+            Add("PortUI.QuickOrderWheel.Open", () => Refl.M(Refl.T("PortUI.QuickOrderWheel"), "Open"),
+                MI(typeof(ToolPatches), "QuickOrderWheel_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
             Add("LudeonTK.DebugTool.DebugToolOnGUI", () => Refl.M(Refl.T("LudeonTK.DebugTool"), "DebugToolOnGUI"),
                 MI(typeof(ToolPatches), "DebugToolOnGUI_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 

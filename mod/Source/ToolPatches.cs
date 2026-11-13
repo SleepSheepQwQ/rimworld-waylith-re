@@ -45,6 +45,12 @@ namespace AgentTouchFix
             }
         }
 
+        internal static void CancelArmedTool()
+        {
+            ClearTool();
+            Refl.Info("debug tool cancelled");
+        }
+
         private static void ClearTool()
         {
             try { _fCurTool?.SetValue(null, null); }
@@ -224,6 +230,25 @@ namespace AgentTouchFix
             if (!_overrideActive) return true;
             __result = _overrideCell;
             return false;
+        }
+
+        /// <summary>
+        /// Long press on empty map normally opens the quick order wheel; while a dev tool is armed
+        /// it must cancel the tool instead (touch equivalent of the right mouse button).
+        /// </summary>
+        internal static bool QuickOrderWheel_Prefix(object[] __args)
+        {
+            try
+            {
+                if (CurTool == null) return true;
+                CancelArmedTool();
+                return false;
+            }
+            catch (Exception e)
+            {
+                Refl.Err("QuickOrderWheel prefix: " + e.Message);
+                return true;
+            }
         }
 
         /// <summary>Do not fire the same armed tool twice when a real MouseDown arrives in the same frame.</summary>
