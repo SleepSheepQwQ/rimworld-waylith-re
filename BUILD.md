@@ -302,7 +302,12 @@ top of it.
 | `Refl.ErrOnce` (patch failed to apply at startup) | always | once per process | at most one, ever |
 
 * Default is silent: no `Verse.Log` call at all.
-* The log file is truncated at startup when it exceeds 512 KB (one check per process, not per line).
+* Bounded size: the sink keeps one `FileStream(FileMode.Append, FileShare.ReadWrite)` + a reused
+  `StreamWriter` open (no per-line open/close), flushes one line at a time, and when
+  `agenttouchfix.log` passes **1 MB** it is renamed to `agenttouchfix.log.1` (the previous `.1` is
+  replaced) and a fresh file is started. The length is only probed every 200 lines or every 30 s
+  (`Environment.TickCount`), never per line, so the cap costs nothing on hot paths.
+  Worst case on disk: ~2 MB (log + one rotated file).
 
 ### 7.3 Diagnostics switch
 

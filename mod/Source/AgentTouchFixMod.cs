@@ -19,8 +19,20 @@ namespace AgentTouchFix
 
         // 0 = off, 1 = on, -1 = not read yet (read exactly once, from Bootstrap).
         private static int _diagState = -1;
-        private static bool _sessionFileChecked;
         private static bool _errLogged;
+
+        // --- file sink ---------------------------------------------------------
+        // One long-lived handle (FileMode.Append + FileShare.ReadWrite) with a reused StreamWriter,
+        // so a line costs a write instead of an open/close pair. FileShare.ReadWrite keeps the log
+        // readable with run-as/adb while the game is running.
+        private const long MaxLogBytes = 1024L * 1024L;   // rotate at 1 MB
+        private const int CheckEveryWrites = 200;         // ... checked at most this often ...
+        private const int CheckEveryMs = 30000;           // ... or once per 30 s, whichever comes first
+        private static readonly object _lock = new object();
+        private static FileStream _fs;
+        private static StreamWriter _w;
+        private static int _writes;
+        private static int _lastCheckTick = int.MinValue / 2;
 
         /// <summary>
         /// True when files/game/agenttouchfix.diag exists. Read once per process (Bootstrap calls
@@ -49,22 +61,75 @@ namespace AgentTouchFix
             Sink("INFO", "diagnostics " + (on ? "ON (" + DiagFlagPath + " exists): INFO lines also mirrored to Log.Message" : "OFF (create " + DiagFlagPath + " to enable): file only, no Verse.Log"));
         }
 
+        private static StreamWriter Writer()
+        {
+            if (_w != null) return _w;
+            try
+            {
+                _fs = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                _w = new StreamWriter(_fs);
+                _w.AutoFlush = false;
+                return _w;
+            }
+            catch
+            {
+                CloseSink();
+                return null;
+            }
+        }
+
+        private static void CloseSink()
+        {
+            try { if (_w != null) _w.Flush(); } catch { }
+            try { if (_w != null) _w.Dispose(); } catch { }
+            try { if (_fs != null) _fs.Dispose(); } catch { }
+            _w = null;
+            _fs = null;
+        }
+
+        /// <summary>
+        /// 1 MB cap: rename to agenttouchfix.log.1 (replacing the previous one) and start a fresh
+        /// file. Only probed every CheckEveryWrites lines or every CheckEveryMs, never per line.
+        /// </summary>
+        private static void MaybeRotate()
+        {
+            int now = Environment.TickCount;
+            bool everyWrites = _writes > 0 && (_writes % CheckEveryWrites) == 0;
+            if (!everyWrites && unchecked(now - _lastCheckTick) < CheckEveryMs) return;
+            _lastCheckTick = now;
+
+            long len;
+            try
+            {
+                FileInfo fi = new FileInfo(LogPath);
+                len = fi.Exists ? fi.Length : 0L;
+            }
+            catch { return; }
+            if (len < MaxLogBytes) return;
+
+            CloseSink();
+            try
+            {
+                string bak = LogPath + ".1";
+                if (File.Exists(bak)) File.Delete(bak);
+                File.Move(LogPath, bak);
+            }
+            catch { }
+        }
+
         private static void Sink(string level, string m)
         {
             try
             {
-                // Keep the file bounded: one truncation check per process, not per line.
-                if (!_sessionFileChecked)
+                lock (_lock)
                 {
-                    _sessionFileChecked = true;
-                    try
-                    {
-                        FileInfo fi = new FileInfo(LogPath);
-                        if (fi.Exists && fi.Length > 512 * 1024) fi.Delete();
-                    }
-                    catch { }
+                    StreamWriter w = Writer();
+                    if (w == null) return;
+                    w.WriteLine(DateTime.Now.ToString("HH:mm:ss.fff") + " " + level + " " + m);
+                    w.Flush();     // per line, so a killed process never loses the last events
+                    _writes++;
+                    MaybeRotate();
                 }
-                File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss.fff") + " " + level + " " + m + "\n");
             }
             catch { }
         }
