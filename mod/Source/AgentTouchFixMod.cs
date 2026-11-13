@@ -125,27 +125,37 @@ namespace AgentTouchFix
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
             Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.T("RimWorld.Selector"), "HandleMapClicks"),
-                ToolPatches.HandleMapClicks_Prefix, null, -1, ref ok, ref skipped, ref failed);
+                MI(typeof(ToolPatches), "HandleMapClicks_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
             Add("PortUI.MobileSelectionController.Tap", () => Refl.M(Refl.T("PortUI.MobileSelectionController"), "Tap"),
-                ToolPatches.Tap_Prefix, null, -1, ref ok, ref skipped, ref failed);
+                MI(typeof(ToolPatches), "Tap_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
             Add("Verse.UI.MouseCell", () => Refl.M(Refl.T("Verse.UI"), "MouseCell"),
-                ToolPatches.MouseCell_Prefix, null, 700, ref ok, ref skipped, ref failed);
+                MI(typeof(ToolPatches), "MouseCell_Prefix"), null, 700, ref ok, ref skipped, ref failed);
 
             Add("LudeonTK.DebugTool.DebugToolOnGUI", () => Refl.M(Refl.T("LudeonTK.DebugTool"), "DebugToolOnGUI"),
-                ToolPatches.DebugToolOnGUI_Prefix, null, -1, ref ok, ref skipped, ref failed);
+                MI(typeof(ToolPatches), "DebugToolOnGUI_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
             Add("Ports1de.TouchGestureEngine.SecondUp", () => Refl.M(Refl.T("Ports1de.TouchGestureEngine"), "SecondUp"),
-                null, PointerPatches.SecondUp_Postfix, -1, ref ok, ref skipped, ref failed);
+                null, MI(typeof(PointerPatches), "SecondUp_Postfix"), -1, ref ok, ref skipped, ref failed);
 
             Add("RwHost.TouchControls.OnTouch", () => Refl.M(Refl.T("RwHost.TouchControls"), "OnTouch"),
-                PointerPatches.OnTouch_Prefix, PointerPatches.OnTouch_Postfix, -1, ref ok, ref skipped, ref failed);
+                MI(typeof(PointerPatches), "OnTouch_Prefix"), MI(typeof(PointerPatches), "OnTouch_Postfix"),
+                -1, ref ok, ref skipped, ref failed);
 
             string summary = "patch summary: ok=" + ok + " skipped=" + skipped + " failed=" + failed;
             if (failed > 0) Refl.Err(summary);
             else if (skipped > 0) Refl.Warn(summary);
             else Refl.Info(summary);
+        }
+
+        private static MethodInfo MI(Type t, string name)
+        {
+            try
+            {
+                return t.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            }
+            catch { return null; }
         }
 
         private static void Add(string label, Func<MethodBase> target, MethodInfo prefix, MethodInfo postfix, int priority,
@@ -162,7 +172,7 @@ namespace AgentTouchFix
                 }
                 if (prefix == null && postfix == null)
                 {
-                    Refl.Warn("skipped (no patch methods): " + label);
+                    Refl.Warn("skipped (patch methods missing): " + label);
                     skipped++;
                     return;
                 }
