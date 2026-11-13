@@ -3,7 +3,7 @@
   <name>AgentTouchFix</name>
   <author>SleepSheepQwQ</author>
   <packageId>sleepsheep.waylith.agenttouchfix</packageId>
-  <modVersion>1.5.0</modVersion>
+  <modVersion>1.6.0</modVersion>
   <supportedVersions>
     <li>1.7</li>
   </supportedVersions>
@@ -85,6 +85,31 @@
    the text away. When the exact match fails, a pending answer from the same window is delivered
    instead: exactly once, and only if it has not expired. Both sides must report the same window id,
    and when there is no window at all (id -1) the keyboard control id has to match as well.
+
+9) Mouse buttons and keys are released when the app loses the input device (v8).
+   The host forwards input to the engine and keeps its own mirror of what is held, but it clears
+   that mirror on surface destroy, configuration change and focus loss without forwarding a
+   release - and OnPause does not even clear it - so the engine kept a button pressed whose
+   release was never sent (the mirror and the engine then agree on "nothing is held", and no later
+   event ever corrects it). The same lifecycle events now release every held mouse button first.
+   OnPause also resets the mirror, which that method never did, so the next press is not swallowed.
+   Keyboard pushes had no bookkeeping at all, so a held key (WASD, Shift) stayed down after focus
+   loss / pause / surface recreation and the pawn kept walking. Presses are now tracked by scan code
+   and the missing releases are sent from the same four lifecycle methods. KEYCODE_BACK is not
+   tracked: it maps to Escape and OnBackPressed already sends its own press+release pair.
+
+10) Lifting one mouse button no longer releases the others (v8).
+   RwHost clears every held button whenever an ACTION_UP arrives. On devices that report the still
+   held buttons in that event, a button the player never released was let go, and the following
+   move event pressed it again - a phantom click / a broken drag. Now only the button that actually
+   went up is released, exactly as the port already does for a second button on a pointer-up; the
+   ordinary single button release is handled by the unmodified game code.
+
+11) Memory is now handed back when the app goes to the background (v8).
+   TRIM_MEMORY_UI_HIDDEN (20) was the only pressure level the port ignored, even though it is the
+   one Android sends when the activity leaves the screen. It is now answered the same way as
+   TRIM_MEMORY_BACKGROUND (40): the texture buffers are released at the next game boundary, at most
+   once every 5 seconds.
 
 Everything is registered with AccessTools and fails soft: a missing target is recorded in the log
 file and the rest of the patches stay active. Nothing is patched permanently outside these

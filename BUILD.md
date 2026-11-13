@@ -562,3 +562,156 @@ mode this replaces is "the text is lost".
   metadata-verified, not play-tested. The first gameplay check should be the three reports that
   motivated them — a pressure event (or the log line above), a double tap on a wall, and a
   Chinese IME commit into a text field.
+
+## 10. v8-inputrel build (version 1.6.0) — the host never sends the release
+
+All four fixes are in `RwHost.MainActivity` / `RwHost.AndroidMemoryAndGcGovernor`, i.e. one layer
+above everything v3–v7 touched (those were all in the game or in PortUI). New file:
+`mod/Source/InputReleasePatches.cs` (A, B, C); D is one more prefix in `GovernorPatches.cs`.
+
+### 10.1 A — mouse buttons stayed pressed
+
+The host keeps a mirror of the held buttons in `MainActivity.mouseButtons` (private int) and the
+diff loop in `MouseEvent` is the **only** place a release is ever forwarded:
+
+```csharp
+int num = (int)e.ButtonState;                 // bitmask 1,2,4,8,16 == buttons 0..4
+...
+for (i = 0..4) if ((mouseButtons & bit) != (num & bit))
+                   Native.glfwAndroidPushMouseButton(i, (num & bit) != 0 ? 1 : 0, 0);
+mouseButtons = num;
+```
+
+Three lifecycle paths clear that mirror **without** forwarding anything (`SurfaceDestroyed:899`,
+`OnConfigurationChanged:915`, `OnWindowFocusChanged(false):945` do `mouseButtons = 0;`), and
+`OnPause:986` does not even do that. Once the mirror is 0 while the engine still holds the button
+down, the next event computes a 0 → 0 difference, so nothing is ever released: the button is stuck
+until the process dies. (Resuming also *re-presses* it, because the first real ButtonState differs
+from the zeroed mirror, giving a phantom click.)
+
+Fix — prefix on all four methods, before the original body runs:
+
+* `SurfaceDestroyed`, `OnConfigurationChanged`, `OnWindowFocusChanged(false)`: read `mouseButtons`,
+  and for every set bit call `glfwAndroidPushMouseButton(i, 0, 0)` (i = 0..4, the same five buttons
+  the diff loop uses). The original then zeroes the mirror exactly as before.
+* `OnPause`: same releases, **plus** `mouseButtons = 0` written through reflection — that method
+  never cleared the mirror, so leaving it set would make the release invisible to the diff loop and
+  swallow the next press instead (a "stuck up" button, the mirror image of this bug).
+* `OnWindowFocusChanged(true)` is untouched (the host only clears on focus loss).
+* The touch engine is not re-cancelled: the originals already do it (`touch?.Cancel()`).
+
+Log (file only): `window focus lost: released 1 held mouse button(s), mirror was 0x1`.
+
+### 10.2 B — keys stayed pressed (WASD / Shift)
+
+`OnKeyDown` (`MainActivity.cs:1565-1598`) and `OnKeyUp` (`:1605-1615`) call
+`Native.glfwAndroidPushKey(num, e.ScanCode, action, mods)` with no bookkeeping at all: press 1 /
+release 0, and nothing on the lifecycle side. A key held while the window loses focus therefore
+stays down in the engine forever — the pawn keeps walking.
+
+Fix: `OnKeyDown` prefix records `e.ScanCode → glfw key` (only for `RepeatCount == 0`, only when
+`AndroidKeyMap.ToGlfw(keyCode) >= 0`, i.e. only when the original really pushes something);
+`OnKeyUp` prefix removes the scan code. The same four lifecycle prefixes then push
+`glfwAndroidPushKey(key, scancode, 0, 0)` for everything left in the set and clear it.
+
+* `KEYCODE_BACK` (4) is deliberately **not** tracked: `AndroidKeyMap` maps 4 and 111 both to GLFW
+  `Escape` (256), and `OnBackPressed` already pushes its own press+release pair, so a tracked Back
+  would be released twice (two `GetKeyUp` edges for one press — menu opens and closes).
+* The stored glfw key is the one the press used, so the release names the same key; the scan code
+  alone would be enough for GLFW but matching the press exactly costs nothing.
+* Reading the event goes through `__args` + reflection (`ScanCode`, `RepeatCount`), so the mod still
+  has no `Mono.Android` compile-time reference (CI guard).
+
+Log: `activity paused: released 2 held key(s)`.
+
+### 10.3 C — `ACTION_UP` released every button
+
+```csharp
+if (action == ACTION_UP || action == ACTION_CANCEL) num = 0;      // MainActivity.cs:1021-1024
+```
+
+`num` **is** the button bitmask, not a pointer count: it is `(int)e.ButtonState`, the five bits
+1/2/4/8/16 are handed to `glfwAndroidPushMouseButton` as buttons 0..4, and the same value is stored
+back into `mouseButtons`. So forcing 0 means "the user let go of every button". On a device that
+reports the still-held buttons in `ACTION_UP`'s ButtonState, that releases buttons nobody released;
+the next `ACTION_MOVE` carries the real ButtonState, differs from the zeroed mirror and *presses
+them again* — a phantom up/down pair (stray click, broken drag) plus a fresh `MouseDown` that
+`DebugTool`/`HandleMapClicks` can act on.
+
+Fix (`MouseEvent_Prefix`, private method, `ref bool __result`): only when
+
+* `ActionMasked == ACTION_UP`,
+* the event really is a mouse event (`(Source & 0x2002) == 8194`, the host's own test),
+* `ButtonState != 0` (something is still held), and
+* at least one button survives clearing `e.ActionButton` (the one that went up),
+
+the prefix does the host's own work itself — `TouchCamera.UseMouse(true)`, `touch.Cancel()`, cursor
+push, then the same diff loop against `remaining = ButtonState & ~ActionButton` — and returns
+`false` so the original cannot force `num = 0`. Everything else (all MOVEs, all POINTER_DOWN/UP,
+SCROLL, ACTION_CANCEL, and the normal single-button `ACTION_UP` whose ButtonState is already 0) runs
+the untouched original, so the everyday path is bit-for-bit v7.
+
+Log (rate limited to 1/s):
+`action up kept other buttons down: mirror 0x3 -> 0x2 (released only the lifted button, ButtonState 0x3, ActionButton 0x1)`.
+
+Risk: if a device reports a ButtonState that names a button the engine never received a press for,
+that button is now kept "down" until the next MOVE reconciles it (the MOVE diff releases it, exactly
+as the host would). The old behaviour in that same situation was to release a button that is really
+still held, which is the worse failure.
+
+### 10.4 D — `TRIM_MEMORY_UI_HIDDEN` (20) was the one level nobody answered
+
+`AndroidMemoryAndGcGovernor.OnTrimMemory` (`:46-68`) answers 15/80 with severity 2 and 10/5/60/40
+with severity 1; level 20 (`TrimMemory.UiHidden`, "the activity left the screen") falls through both
+branches and does nothing. `MainActivity.OnTrimMemory` (`:1096-1112`) filters identically.
+
+Fix: `OnTrimMemory_Prefix` on the governor. For `level == 20` it calls
+`AndroidMemoryAndGcGovernor.Request(1)` — the exact call the `Background` (40) branch makes, i.e. the
+existing `pending` flag that `GameBoundary` consumes at the next game frame. That keeps one trim
+channel with v7's throttles (5 s low / 30 s critical, one release per pressure event) instead of a
+second, differently timed one. `TouchCamera.RequestMemoryTrim()` was considered and rejected: it is
+a separate `TextureCacheStore`-only path with its own 30 s throttle in `GameCamera`, so it would give
+UI_HIDDEN different semantics from Background.
+
+Rate limited to one request per 5 s (the level can be redelivered while the process sits cached).
+The original method still runs — it is a no-op for 20, and other levels are not this patch's
+business. `MainActivity.OnTrimMemory` is not patched separately: the governor is registered as
+`IComponentCallbacks2`, so it receives the same callback.
+
+Log: `TRIM_MEMORY_UI_HIDDEN(20) treated as background: pending=1, engine textures release at the next game boundary`.
+
+Note: if the game is already fully paused, `GameBoundary` will not run until resume, so the release
+lands on the first frame back — same as a `Background` event arriving just before the pause.
+
+### 10.5 Verification and build
+
+* target shapes re-read from `dlls/RwHost.dll` metadata (`dnfile` 0.18.0) — every patch target
+  exists exactly once with the arity used, no overload guessing:
+  `MainActivity.SurfaceDestroyed(holder)`, `OnConfigurationChanged(configuration)` (single overload —
+  the "two-parameter" variant mentioned in the task does not exist in this build),
+  `OnWindowFocusChanged(hasFocus)`, `OnPause()`, `OnKeyDown(keyCode, e)`, `OnKeyUp(keyCode, e)`,
+  private `MouseEvent(e)`, `AndroidMemoryAndGcGovernor.OnTrimMemory(level)`,
+  `AndroidMemoryAndGcGovernor.Request(severity)` (public static), `Native.glfwAndroidPushMouseButton(button, action, mods)`,
+  `Native.glfwAndroidPushKey(key, scancode, action, mods)`, `Native.glfwAndroidPushCursorPos(x, y)`,
+  `AndroidKeyMap.ToGlfw(code)` (public static), `TouchCamera.UseMouse(value)`, `TouchControls.Cancel()`,
+  and the fields `MainActivity.mouseButtons` (private int) / `MainActivity.touch` (private TouchControls).
+  `AndroidKeyMap` is `internal`, so it is resolved at runtime, not by reference.
+* the produced DLL contains `SurfaceDestroyed_Prefix`, `OnConfigurationChanged_Prefix`,
+  `OnWindowFocusChanged_Prefix`, `OnPause_Prefix`, `OnKeyDown_Prefix`, `OnKeyUp_Prefix`,
+  `MouseEvent_Prefix`, `OnTrimMemory_Prefix`, `ReleaseMouseButtons`, `ReleaseKeys`, and the literals
+  `BUILD v8-inputrel`, `TRIM_MEMORY_UI_HIDDEN(20) treated as background`,
+  `action up kept other buttons down`, `held mouse button(s)`, `held key(s)`.
+* assembly references are still exactly `0Harmony`, `Assembly-CSharp`, `System.Runtime` — no
+  `RwHost` / `PortUI` / `Mono.Android` / `UnityEngine` reference was added by reading any of this
+  through reflection, and the CI guard passes.
+* CI run **43462609399** (`d57be1b`), `dotnet build -c Release`: success, 0 errors.
+* `Assemblies/AgentTouchFix.dll` **67,072 bytes**, md5 `a4122739406910bd83e2a9c5620dee16`
+  (sha256 `165ec758c5f875ddb1828f53d183b47de4fba45aaa1d450454dfccc57dbf31f8`); v7 was 55,808 B.
+* artifact `AgentTouchFix.zip` **29,893 bytes**, md5 `b2635ca1707eb4f2014e1e9c7fd3ee93`, staged at
+  `~/.hermes/cache/scratch/agenttouchfix/v8/AgentTouchFix.zip`, unzipped next to it in
+  `v8/AgentTouchFix/`.
+* **not deployed and not run in the game** (as instructed). First gameplay check: hold the left
+  button (or a mouse-look drag) and switch app / rotate / show the keyboard — the drag must stop and
+  the button must be released; hold W and background the app — the pawn must stop; with a mouse
+  drag that ends while a second button is held, the second button must stay down and not re-click;
+  and going to the home screen must produce the `TRIM_MEMORY_UI_HIDDEN(20)` log line (once per 5 s).
