@@ -30,7 +30,7 @@ namespace AgentTouchFix
 
         private static bool _disable = true;      // off == do not build atlases
         private static int _skipped;
-        private static int _lastLogMs = -100000;
+        private static long _lastLogMs = -100000L;
 
         internal static bool Disabled { get { return _disable; } }
 
