@@ -173,6 +173,9 @@ namespace AgentTouchFix
             Add("Verse.UI.MouseCell", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseCell"),
                 MI(typeof(ToolPatches), "MouseCell_Prefix"), null, 700, ref ok, ref skipped, ref failed);
 
+            Add("Verse.UI.MouseMapPosition", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseMapPosition"),
+                MouseMapPositionPrefix(), null, 700, ref ok, ref skipped, ref failed);
+
             Add("PortUI.QuickOrderWheel.Open", () => Refl.M(Refl.TPrefer("PortUI", "PortUI.QuickOrderWheel"), "Open"),
                 MI(typeof(ToolPatches), "QuickOrderWheel_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
@@ -196,9 +199,40 @@ namespace AgentTouchFix
 
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines. Runs last so the fix summary is never buried.
-            Refl.Info("DIAG BUILD v3-diagnostic (v1.1.0) - instrumentation active, behaviour unchanged");
+            Refl.Info("BUILD v4-toolsnap (1.2.0) - tap snapping via PortUI.Candidates + MouseMapPosition pin, v3 diagnostics retained (2 lines/s)");
             try { Diag.Install(); }
             catch (Exception e) { Refl.Err("diag install failed: " + e); }
+        }
+
+        /// <summary>
+        /// UI.MouseMapPosition returns UnityEngine.Vector3. To keep the mod free of a compile-time
+        /// UnityEngine reference (the CI guard rejects a UnityEngine assembly reference) the prefix is
+        /// a generic method that is closed over the live return type here: the closed MethodInfo really
+        /// takes 'ref UnityEngine.Vector3', which is what Harmony binds against.
+        /// </summary>
+        private static MethodInfo MouseMapPositionPrefix()
+        {
+            try
+            {
+                MethodBase target = Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseMapPosition");
+                if (target == null) return null;
+                MethodInfo open = typeof(ToolPatches).GetMethod("MouseMapPosition_Prefix",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (open == null || !open.IsGenericMethodDefinition)
+                {
+                    Refl.Warn("MouseMapPosition prefix method missing or not generic - map position not pinned");
+                    return null;
+                }
+                Type ret = ((MethodInfo)target).ReturnType;
+                MethodInfo closed = open.MakeGenericMethod(ret);
+                Refl.Info("UI.MouseMapPosition prefix closed over " + ret.FullName);
+                return closed;
+            }
+            catch (Exception e)
+            {
+                Refl.Warn("UI.MouseMapPosition prefix could not be built: " + e.Message);
+                return null;
+            }
         }
 
         private static MethodInfo MI(Type t, string name)

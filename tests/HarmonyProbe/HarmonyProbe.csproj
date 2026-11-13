@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CI probe for the one non-obvious mechanism in the mod: UI.MouseMapPosition returns
+    UnityEngine.Vector3, and the mod refuses to carry a compile-time UnityEngine reference, so its
+    prefix is a generic method closed over the live return type at runtime
+    (ToolPatches.MouseMapPosition_Prefix<T>). This project reproduces exactly that shape against a
+    stand-in struct and asserts that Harmony installs the closed generic prefix and that the
+    boxed-value round trip works. Nothing here is shipped with the mod.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>HarmonyProbe</AssemblyName>
+    <RootNamespace>HarmonyProbe</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>$(NoWarn);CS1701;CS1702;MSB3277</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(MSBuildThisFileDirectory)..\..\dlls\0Harmony.dll</HintPath>
+      <Private>true</Private>
+      <SpecificVersion>false</SpecificVersion>
+    </Reference>
+  </ItemGroup>
+
+</Project>

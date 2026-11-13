@@ -3,7 +3,7 @@
   <name>AgentTouchFix</name>
   <author>SleepSheepQwQ</author>
   <packageId>sleepsheep.waylith.agenttouchfix</packageId>
-  <modVersion>1.1.0</modVersion>
+  <modVersion>1.2.0</modVersion>
   <supportedVersions>
     <li>1.7</li>
   </supportedVersions>
@@ -14,7 +14,11 @@
    and never produces the MouseDown that DebugTool.DebugToolOnGUI needs, so an armed tool never
    fires and the tap is stolen by the selector.
    - PortUI.MobileSelectionController.Tap is skipped while a tool is armed; the tool's clickAction
-     is invoked instead, with UI.MouseCell() pinned to the tapped cell.
+     is invoked instead, with UI.MouseCell() and UI.MouseMapPosition() pinned to the tapped target.
+   - The tap is snapped through PortUI's own candidate picker (MobileSelectionController.Candidates:
+     the exact cell first, then the 5x5 surrounding cells within a 28.8 px screen radius, nearest
+     first), so a tap does not have to land exactly on the entity. Empty ground keeps the raw tap
+     coordinate, unrounded.
    - Long press cancels the armed tool (touch equivalent of the right mouse button).
    - RimWorld.Selector.HandleMapClicks is skipped while a tool is armed (real mouse fallback) and a
      half-open drag box is disarmed so selection can never "stick".
@@ -33,7 +37,7 @@
 
 Everything is registered with AccessTools and fails soft: a missing target logs one red line
 ([AgentTouchFix] ...) and the rest of the patches stay active. Nothing is patched permanently
-outside these seven methods.
+outside these eight methods.
 
 Requires the mobile port (PortUI/RwHost present). Harmless on desktop RimWorld: the touch-only
 patches are simply skipped.</description>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using Verse;
 
@@ -11,6 +12,13 @@ namespace AgentTouchFix
     /// (PortUI.MobileSelectionController.Tap) without ever producing a MouseDown that
     /// LudeonTK.DebugTool.DebugToolOnGUI could consume, so an armed dev tool never fires
     /// and the tap is stolen by the selector instead.
+    ///
+    /// v4: the tap is no longer forced onto the rounded cell only. The tap position is resolved
+    /// through PortUI's own nearest-target picker (MobileSelectionController.Candidates: exact cell
+    /// first, then the 5x5 surrounding cells inside a 28.8 px screen radius, nearest first), and
+    /// both UI.MouseCell() and UI.MouseMapPosition() are pinned to the resolved target for the
+    /// duration of the clickAction. A tap that is a few pixels off the entity now still hits the
+    /// entity instead of landing on empty ground.
     /// </summary>
     internal static class ToolPatches
     {
@@ -24,10 +32,16 @@ namespace AgentTouchFix
         private static bool _timeResolved;
         private static PropertyInfo _pFrameCount;    // UnityEngine.Time.frameCount
 
+        private static bool _snapResolved;
+        private static MethodInfo _mCandidates;      // PortUI.MobileSelectionController.Candidates(Vector3)
+        private static PropertyInfo _pDrawPos;       // Verse.Thing.DrawPos (UnityEngine.Vector3)
+
         // --- state -------------------------------------------------------------
         private static int _lastFireClock = int.MinValue;
         private static bool _overrideActive;
-        private static IntVec3 _overrideCell;
+        private static IntVec3 _overrideCell;        // what UI.MouseCell() reports during clickAction
+        private static object _overrideMapPos;       // boxed UnityEngine.Vector3 for UI.MouseMapPosition()
+        private static bool _snapWarned;
 
         internal static object CurTool
         {
@@ -104,9 +118,16 @@ namespace AgentTouchFix
             return Environment.TickCount / 16;
         }
 
-        private static bool TryCellFrom(object vec3, out IntVec3 cell)
+        private static string N(float v)
         {
-            cell = default(IntVec3);
+            try { return v.ToString("0.##"); }
+            catch { return "?"; }
+        }
+
+        /// <summary>Read x/z out of a Vector3 boxed as object (no UnityEngine reference, no cast).</summary>
+        private static bool TryXZ(object vec3, out float x, out float z)
+        {
+            x = 0f; z = 0f;
             if (vec3 == null) return false;
             Type t = vec3.GetType();
             FieldInfo fx = null, fz = null;
@@ -119,15 +140,91 @@ namespace AgentTouchFix
             if (fx == null || fz == null) return false;
             try
             {
-                float x = Convert.ToSingle(fx.GetValue(vec3));
-                float z = Convert.ToSingle(fz.GetValue(vec3));
-                cell = new IntVec3((int)Math.Round((double)x), 0, (int)Math.Round((double)z));
+                x = Convert.ToSingle(fx.GetValue(vec3));
+                z = Convert.ToSingle(fz.GetValue(vec3));
                 return true;
             }
-            catch { return false; }
+            catch { x = 0f; z = 0f; return false; }
         }
 
-        /// <summary>Run the armed debug tool at the tapped map cell. Returns false only when no tool is armed.</summary>
+        private static bool TryCellFrom(object vec3, out IntVec3 cell)
+        {
+            cell = default(IntVec3);
+            float x, z;
+            if (!TryXZ(vec3, out x, out z)) return false;
+            cell = new IntVec3((int)Math.Round((double)x), 0, (int)Math.Round((double)z));
+            return true;
+        }
+
+        /// <summary>How many Things sit on that cell (-1 when it cannot be read).</summary>
+        private static int CountThingsAt(IntVec3 cell)
+        {
+            try
+            {
+                Map map = Find.CurrentMap;
+                if (map == null || !cell.InBounds(map)) return -1;
+                return map.thingGrid.ThingsListAt(cell).Count;
+            }
+            catch { return -1; }
+        }
+
+        private static string DefName(Thing t)
+        {
+            try { return t.def != null ? t.def.defName : "?"; }
+            catch { return "?"; }
+        }
+
+        /// <summary>
+        /// First entry of PortUI.MobileSelectionController.Candidates(tapPos), or null.
+        /// Candidates is the port's own "what did the user aim at" resolution: objects on the exact
+        /// cell, plus - when that cell holds no Thing - every Thing within the 5x5 surrounding cells
+        /// and a 28.8 px screen radius, sorted nearest first. Reusing it keeps dev tool taps
+        /// consistent with what a normal tap would have selected.
+        /// </summary>
+        private static object CandidatesFirst(object tapPos)
+        {
+            if (tapPos == null) return null;
+            if (!_snapResolved)
+            {
+                _snapResolved = true;
+                Type t = Refl.TPrefer("PortUI", "PortUI.MobileSelectionController");
+                _mCandidates = Refl.M(t, "Candidates");
+                if (_mCandidates == null)
+                    Refl.Warn("PortUI.MobileSelectionController.Candidates not found - tap snapping disabled");
+            }
+            if (_mCandidates == null) return null;
+
+            object list;
+            try { list = _mCandidates.Invoke(null, new object[] { tapPos }); }
+            catch { _mCandidates = null; return null; }
+
+            IEnumerable items = list as IEnumerable;
+            if (items == null) return null;
+            try
+            {
+                foreach (object o in items) return o;
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>Thing.DrawPos, boxed. Virtual property: reflection dispatches to the override.</summary>
+        private static object DrawPosOf(Thing thing)
+        {
+            try
+            {
+                if (_pDrawPos == null)
+                {
+                    Type tt = Refl.TPrefer("Assembly-CSharp", "Verse.Thing");
+                    _pDrawPos = Refl.Prop(tt, "DrawPos");
+                }
+                if (_pDrawPos == null) return null;
+                return _pDrawPos.GetValue(thing, null);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Run the armed debug tool at the tapped map position. Returns false only when no tool is armed.</summary>
         internal static bool Fire(object tapPos, bool cancel)
         {
             object tool = CurTool;
@@ -148,17 +245,57 @@ namespace AgentTouchFix
                 return true;
             }
 
-            IntVec3 cell;
-            bool haveCell = TryCellFrom(tapPos, out cell);
-            if (haveCell)
+            float tapX, tapZ;
+            bool haveTap = TryXZ(tapPos, out tapX, out tapZ);
+            IntVec3 tapCell;
+            bool haveCell = TryCellFrom(tapPos, out tapCell);
+            int things = haveCell ? CountThingsAt(tapCell) : -1;
+
+            // Always logged: this is what tells "the tap landed on an empty cell" apart from
+            // "the tap landed correctly but the snap picked the wrong thing".
+            Refl.Info("tool fire tap=" + (haveTap ? "(" + N(tapX) + "," + N(tapZ) + ")" : "?")
+                + " cell=" + (haveCell ? "(" + tapCell.x + "," + tapCell.z + ")" : "?")
+                + " things=" + things);
+
+            // Nearest-target snapping through PortUI's own candidate picker.
+            Thing snapped = null;
+            IntVec3 targetCell = tapCell;
+            object targetPos = tapPos;
+            try
             {
-                _overrideCell = cell;
+                snapped = CandidatesFirst(tapPos) as Thing;
+                if (snapped != null)
+                {
+                    targetCell = snapped.Position;
+                    object dp = DrawPosOf(snapped);
+                    if (dp != null) targetPos = dp;
+                    Refl.Info("tool snap -> " + DefName(snapped) + " at " + targetCell);
+                }
+            }
+            catch (Exception e)
+            {
+                // Reflection trouble must never change behaviour: fall back to the raw tap.
+                snapped = null;
+                targetCell = tapCell;
+                targetPos = tapPos;
+                if (!_snapWarned)
+                {
+                    _snapWarned = true;
+                    Refl.Warn("tap snapping disabled after reflection error: " + e.Message);
+                }
+            }
+
+            if (haveTap)
+            {
+                _overrideCell = targetCell;
+                _overrideMapPos = targetPos;
                 _overrideActive = true;
             }
             try
             {
                 action.DynamicInvoke();
-                Refl.Info("debug tool fired at " + (haveCell ? cell.ToString() : "mouse cell"));
+                Refl.Info("debug tool fired at " + (haveTap ? targetCell.ToString() : "mouse cell")
+                    + (snapped != null ? " (snapped)" : ""));
             }
             catch (Exception e)
             {
@@ -170,6 +307,7 @@ namespace AgentTouchFix
             finally
             {
                 _overrideActive = false;
+                _overrideMapPos = null;
                 _lastFireClock = Now();
             }
             return true;
@@ -240,7 +378,7 @@ namespace AgentTouchFix
         }
 
         /// <summary>
-        /// While a tool click runs, UI.MouseCell() must report the tapped cell. PortUI
+        /// While a tool click runs, UI.MouseCell() must report the tapped (or snapped) cell. PortUI
         /// rewrites MouseCell for its designator preview; running at High priority keeps
         /// this override in front of it.
         /// </summary>
@@ -249,6 +387,31 @@ namespace AgentTouchFix
             if (!_overrideActive) return true;
             __result = _overrideCell;
             return false;
+        }
+
+        /// <summary>
+        /// While a tool click runs, UI.MouseMapPosition() must report the exact tapped map position
+        /// (or the snapped target's DrawPos). Most LudeonTK tools read the map position rather than
+        /// the cell, and without this they see wherever the port last pushed the cursor - which is
+        /// why a tap a few pixels off still missed.
+        ///
+        /// The prefix is generic on purpose: MouseMapPosition returns UnityEngine.Vector3, and this
+        /// mod deliberately carries zero compile-time UnityEngine references (the CI guard rejects a
+        /// UnityEngine assembly reference). Bootstrap closes this method over the live return type,
+        /// so in IL the parameter really is 'ref UnityEngine.Vector3'. The value is handed back as a
+        /// boxed Vector3 and unboxed here.
+        /// </summary>
+        internal static bool MouseMapPosition_Prefix<T>(ref T __result)
+        {
+            if (!_overrideActive) return true;
+            object v = _overrideMapPos;
+            if (v == null) return true;
+            try
+            {
+                __result = (T)v;
+                return false;
+            }
+            catch { return true; }
         }
 
         /// <summary>

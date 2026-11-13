@@ -8,6 +8,7 @@ on:
   push:
     paths:
       - 'mod/**'
+      - 'tests/**'
       - 'dlls/0Harmony.dll'
       - 'dlls/Assembly-CSharp.dll'
       - '.github/workflows/build-mod.yml'
@@ -27,6 +28,12 @@ jobs:
 
       - name: dotnet info
         run: dotnet --info
+
+      # Proves the MouseMapPosition prefix shape works: Harmony accepts a patch method that is a
+      # generic method closed over the target's real return type (the mod has no compile-time
+      # UnityEngine reference, so 'ref Vector3' cannot be written literally there).
+      - name: Harmony generic-prefix probe
+        run: dotnet run --project tests/HarmonyProbe/HarmonyProbe.csproj -c Release
 
       - name: Build AgentTouchFix
         run: dotnet build mod/AgentTouchFix.csproj -c Release -v minimal

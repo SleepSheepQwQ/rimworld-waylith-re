@@ -27,15 +27,20 @@ namespace AgentTouchFix
     internal static class Diag
     {
         // ---------------------------------------------------------------- rate limits
-        // Add: at most 5 lines per wall clock second (a pinch can emit one per frame).
+        // v4: every channel is capped at 2 lines per wall clock second (v3 allowed 5 per second on
+        // Add / tcam.Add and 10 per second on MOVE events, which flooded the log).
+        // Add: at most 2 lines per wall clock second (a pinch can emit one per frame).
         private static long _addSec = -1;
         private static int _addCount, _addDropped;
         // tcam.Add: same budget, tracked separately so one can't starve the other.
         private static long _tcamSec = -1;
         private static int _tcamCount, _tcamDropped;
-        // MOVE events: at most one line per 100 ms per chain; every other action is always logged.
+        // MOVE events: at most one line per 100 ms per chain AND at most 2 per second; every other
+        // action is always logged.
         private static long _classicMs = -100000L, _modernMs = -100000L;
         private static int _classicDropped, _modernDropped;
+        private static long _classicSec = -1, _modernSec = -1;
+        private static int _classicSecCount, _modernSecCount;
 
         private static long Ms()
         {
@@ -183,7 +188,7 @@ namespace AgentTouchFix
                 float zoom = ToF(__args[2]);
                 if (Math.Abs(zoom) <= 0.0001f) return;
 
-                bool log = SecGate(ref _addSec, ref _addCount, 5);
+                bool log = SecGate(ref _addSec, ref _addCount, 2);
                 if (!log) { _addDropped++; return; }
 
                 string tail = _addDropped > 0 ? " sup=" + _addDropped : "";
@@ -204,7 +209,7 @@ namespace AgentTouchFix
                 float zoom = ToF(__args[2]);
                 if (Math.Abs(zoom) <= 0.0001f) return;
 
-                bool log = SecGate(ref _tcamSec, ref _tcamCount, 5);
+                bool log = SecGate(ref _tcamSec, ref _tcamCount, 2);
                 if (!log) { _tcamDropped++; return; }
 
                 string tail = _tcamDropped > 0 ? " sup=" + _tcamDropped : "";
@@ -233,7 +238,11 @@ namespace AgentTouchFix
                 // (or parked in Ignore) is exactly the reported symptom, so never throttle those.
                 bool stuck = move && ptr < 2 && (mode == "Pinch" || mode == "Ignore");
 
-                if (move && !stuck && !Gate(ref _classicMs, 100L, ref _classicDropped)) return;
+                if (move && !stuck)
+                {
+                    if (!SecGate(ref _classicSec, ref _classicSecCount, 2)) return;
+                    if (!Gate(ref _classicMs, 100L, ref _classicDropped)) return;
+                }
 
                 string line = "classic act=" + act + " ptr=" + ptr + " mode=" + mode
                     + " x=" + N(Motion.GetX(e, 0)) + " y=" + N(Motion.GetY(e, 0));
@@ -264,7 +273,11 @@ namespace AgentTouchFix
                 ResolveModern(__instance);
 
                 bool move = act == 2;
-                if (move && !Gate(ref _modernMs, 100L, ref _modernDropped)) return;
+                if (move)
+                {
+                    if (!SecGate(ref _modernSec, ref _modernSecCount, 2)) return;
+                    if (!Gate(ref _modernMs, 100L, ref _modernDropped)) return;
+                }
 
                 object engine = Read(_fEngine, __instance);
                 string line = "modern act=" + act + " ptr=" + ptr

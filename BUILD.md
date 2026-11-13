@@ -223,3 +223,60 @@ How to read the report:
   (`case 6` sets `mode = Ignore`, and `Ignore` has no branch in MOVE).
 * on the world map `GameCamera.WorldPrefix` turns zoom into `desiredAltitude` (world zoom), on a
   map into `CameraDriver.desiredSize`; the stack in the `Add` line says which one.
+
+## 6. v4-toolsnap build (version 1.2.0) — tap precision
+
+User report on the v3 build: dev tools "work, but only if the tap lands exactly on the entity; a
+few pixels off and it hits empty ground". Two causes, both fixed here:
+
+1. only `Verse.UI.MouseCell` was pinned — tools that read `Verse.UI.MouseMapPosition()` (a
+   `UnityEngine.Vector3`) still saw the cursor position the port pushed, not the tap;
+2. the tap was forced onto the *rounded* cell, throwing away the port's own forgiveness
+   (`PortUI.MobileSelectionController.Candidates` resolves the exact cell first and then, when
+   that cell holds no `Thing`, every `Thing` in the surrounding 5x5 cells within a 28.8 px
+   screen radius, nearest first).
+
+### 6.1 New / changed patches
+
+| # | target | change |
+|---|---|---|
+| 8 | `Verse.UI.MouseMapPosition()` | **new** prefix `(ref T __result) -> bool`, priority High (700), same as `MouseCell`. While a `clickAction` runs it returns the exact snapped map position; no tool click -> passthrough. |
+| 3 | `Verse.UI.MouseCell()` | now returns the *snapped* cell (`Thing.Position`) instead of the rounded tap cell. |
+| 1 | `PortUI.MobileSelectionController.Tap` | unchanged consumption, but `Fire()` now resolves the target through `Candidates` and logs it. |
+| diag | `Add`, `tcam.Add`, `classic`, `modern` | v3 lines kept, per-second budget lowered to **2 lines/s** (`Add`/`tcam.Add` were 5, MOVE lines were ~10). |
+
+`MouseMapPosition` returns `UnityEngine.Vector3` and this mod deliberately carries **zero**
+compile-time `UnityEngine` references (the CI step rejects a `UnityEngine` assembly reference, and
+section 1 of this file claims none). The prefix is therefore a generic method:
+
+```csharp
+internal static bool MouseMapPosition_Prefix<T>(ref T __result)
+```
+
+and `Bootstrap.MouseMapPositionPrefix()` closes it over
+`Refl.M(Verse.UI, "MouseMapPosition").ReturnType` at install time, so the closed `MethodInfo` really
+takes `ref UnityEngine.Vector3`. The value is carried as a boxed `Vector3` (`Thing.DrawPos` read by
+reflection, or the tap position itself) and unboxed in the prefix. `tests/HarmonyProbe/` proves the
+mechanism in CI: it patches a stand-in struct-returning method with the same shape and asserts
+passthrough, override, restore-after-disable and wrong-type fallback. If the generic closure fails
+at runtime the mod logs one warning and `MouseCell` pinning keeps working as before.
+
+### 6.2 Snapping rules
+
+* `Fire()` logs every tap first:
+  `tool fire tap=(x,z) cell=(x,z) things=N` (`N` = `Find.CurrentMap.thingGrid.ThingsListAt(cell).Count`).
+  `things=0` + a `tool snap ->` line = the tap missed the entity and the snap caught it;
+  `things=0` + no snap line = the tap really did land on empty ground.
+* `PortUI.MobileSelectionController.Candidates(tapPos)` is invoked by reflection; if its first
+  element is a `Thing`, `MouseCell` is pinned to `thing.Position`, `MouseMapPosition` to
+  `thing.DrawPos` (or to the tap position if `DrawPos` cannot be read), and
+  `tool snap -> <defName> at <cell>` is logged.
+* No candidate -> old behaviour minus the rounding loss: `MouseCell` gets the rounded tap cell,
+  `MouseMapPosition` gets the exact tap coordinate.
+* Every reflection failure is contained: one warning on first failure, then the raw tap is used.
+
+### 6.3 Caveat
+
+Snapping is intentionally forgiving, which means an empty-cell tool (terrain, spawn, dig
+designators) tapped next to a wall or item will be snapped onto that thing. The `tool snap ->` line
+names the target every time, so read the log before blaming the tool.
