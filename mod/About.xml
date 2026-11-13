@@ -62,6 +62,30 @@
    holding the finger down for 600 ms or more shows the description on purpose. On desktop, or with
    a real mouse being moved, nothing changes. A skipped tooltip never calls Event.current.Use().
 
+6) Textures stop blinking / turning grey after a memory pressure event (v7).
+   RwHost.AndroidMemoryAndGcGovernor answered one pressure event twice: GameBoundary released every
+   decoded texture staging buffer and set renderTrim = 1, then RenderBoundary released them again on
+   the next render frame - exactly when the queued uploads are consumed - so the buffers that were
+   decoded but not yet uploaded were evicted and the texture showed as a grey block until it was
+   decoded again. The render-side release is now skipped within 500 ms of a game-side one.
+   renderTrim is left set, so that trim is deferred to a later frame instead of being lost; pause,
+   surface and device-loss paths are untouched.
+
+7) Double tapping a building selects every one of that kind on screen (v7).
+   PortUI.MobileSelectionController.Tap only had a multi-select branch for ThingCategory.Item, so a
+   double tap on a wall or a workbench just re-selected the single building. A second tap on the same
+   building within 400 ms is now handled by the mod: it pins UI.MouseCell()/UI.MouseMapPosition() to
+   the building and calls the vanilla Selector.SelectAllMatchingObjectUnderMouseOnScreen(), which is
+   what a desktop double click does. The current selection is not cleared first.
+
+8) Text typed with the Android keyboard is no longer dropped, which is what made Chinese input look
+   broken (v7). Ports1de.TextEditMailbox.TryTake() compared the whole TextEditTarget - window id,
+   keyboard control id and the field rect - so any layout change between opening the editor and the
+   IME answering (a scrolled window, a re-laid-out dialog, the keyboard resizing the screen) threw
+   the text away. When the exact match fails, a pending answer from the same window is delivered
+   instead: exactly once, and only if it has not expired. Both sides must report the same window id,
+   and when there is no window at all (id -1) the keyboard control id has to match as well.
+
 Everything is registered with AccessTools and fails soft: a missing target is recorded in the log
 file and the rest of the patches stay active. Nothing is patched permanently outside these
 methods.
