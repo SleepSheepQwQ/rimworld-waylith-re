@@ -340,7 +340,8 @@ namespace HarmonyProbe
             PlanPatches.Seen = null; PlanPatches.Result = false;
 
             bool ok;
-            try { ok = DdsStub.TryPlan(new byte[] { 64, 32, 2 }, 1234); }
+            PlanStub direct;
+            try { ok = DdsStub.TryPlan(new byte[] { 64, 32, 2 }, 1234, out direct); }
             catch (Exception e)
             {
                 Console.WriteLine("FAIL: the patched call threw " + e.GetType().Name + ": " + e.Message);
@@ -354,6 +355,7 @@ namespace HarmonyProbe
                 fail++;
             }
             if (!ok || !PlanPatches.Result) { Console.WriteLine("FAIL: __result not visible to the postfix"); fail++; }
+            if (direct == null) { Console.WriteLine("FAIL: the unpatched call returned no plan"); fail++; }
             PlanStub p = PlanPatches.Seen as PlanStub;
             if (p == null) Console.WriteLine("FAIL: out plan did not reach the postfix as object");
             else if (p.Width != 64 || p.Height != 32 || p.Shift != 2)
@@ -389,7 +391,9 @@ namespace HarmonyProbe
 
             ConvPatches.Calls = 0; ConvPatches.Args = null; ConvPatches.Result = false;
             bool ok;
-            try { ok = ConvStub.TryConvert(new byte[] { 1, 2, 3, 4 }, 4, 2048, null); }
+            byte[] directConverted;
+            int directUsed;
+            try { ok = ConvStub.TryConvert(new byte[] { 1, 2, 3, 4 }, 4, 2048, null, out directConverted, out directUsed); }
             catch (Exception e)
             {
                 Console.WriteLine("FAIL: the patched call threw " + e.GetType().Name + ": " + e.Message);
@@ -406,6 +410,7 @@ namespace HarmonyProbe
             int dim = a.Length > 7 ? Convert.ToInt32(a[7]) : -1;
             if (converted == null || converted.Length != 4) { Console.WriteLine("FAIL: out byte[] not visible through __args"); fail++; }
             if (used != 4) { Console.WriteLine("FAIL: out int used=" + used + " (4 expected)"); fail++; }
+            if (directUsed != 4 || directConverted == null) { Console.WriteLine("FAIL: the unpatched call returned used=" + directUsed); fail++; }
             if (budget != 2048) { Console.WriteLine("FAIL: budget=" + budget + " (2048 expected)"); fail++; }
             if (dim != 8192) { Console.WriteLine("FAIL: maxDimension=" + dim + " (8192 expected)"); fail++; }
             if (fail == 0) Console.WriteLine("verified: __args postfix sees in args and both out values (used=" + used + ")");
