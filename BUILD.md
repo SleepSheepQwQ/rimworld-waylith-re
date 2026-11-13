@@ -705,11 +705,16 @@ lands on the first frame back — same as a `Background` event arriving just bef
   `RwHost` / `PortUI` / `Mono.Android` / `UnityEngine` reference was added by reading any of this
   through reflection, and the CI guard passes.
 * CI run **43462609399** (`d57be1b`), `dotnet build -c Release`: success, 0 errors.
-* `Assemblies/AgentTouchFix.dll` **67,072 bytes**, md5 `a4122739406910bd83e2a9c5620dee16`
-  (sha256 `165ec758c5f875ddb1828f53d183b47de4fba45aaa1d450454dfccc57dbf31f8`); v7 was 55,808 B.
-* artifact `AgentTouchFix.zip` **29,893 bytes**, md5 `b2635ca1707eb4f2014e1e9c7fd3ee93`, staged at
+* `Assemblies/AgentTouchFix.dll` **67,072 bytes**, md5 `7fa21cfe253f426f00eff2a5b6ac4b11`
+  (sha256 `42a2dec71ef89946ebda3021d576adfc5bbacfe7686338244f4e17fbd6fd9703`); v7 was 55,808 B.
+* `AgentTouchFix.csproj` now sets `<IncludeSourceRevisionInInformationalVersion>false</...>`: the
+  .NET 8+ SDK appends `+<git sha>` to `AssemblyInformationalVersion`, and the v8 docs commit alone
+  produced a different 67,072-byte DLL (`a4122739…` → `a23f548b…`). With the sha pinned the bytes
+  depend on the source only, so the hashes below stay valid across documentation commits.
+* artifact `AgentTouchFix.zip` **30,594 bytes**, md5 `5f299d155de47d5eb14d8bc5ce9df685`, staged at
   `~/.hermes/cache/scratch/agenttouchfix/v8/AgentTouchFix.zip`, unzipped next to it in
-  `v8/AgentTouchFix/`.
+  `v8/AgentTouchFix/` (from run **43463836056**, `7b0bb08`). The zip md5 changes per run because the
+  entry mtimes do; the DLL inside is byte-stable.
 * **not deployed and not run in the game** (as instructed). First gameplay check: hold the left
   button (or a mouse-look drag) and switch app / rotate / show the keyboard — the drag must stop and
   the button must be released; hold W and background the app — the pawn must stop; with a mouse
