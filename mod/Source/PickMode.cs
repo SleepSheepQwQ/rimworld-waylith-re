@@ -109,7 +109,10 @@ namespace AgentTouchFix
 
                 // Same rounding as the original: IntVec3(Vector3) truncates, it does not round.
                 IntVec3 cell = new IntVec3((int)x, 0, (int)z);
-                if (!cell.InBounds(map)) return true;
+                // Explicit comparison, not GenGrid.InBounds: IntVec3 has an implicit conversion to
+                // Vector3, so the extension method can bind to the Vector3 overload and drag in the
+                // UnityStubs reference this mod must not carry.
+                if (cell.x < 0 || cell.z < 0 || cell.x >= map.Size.x || cell.z >= map.Size.z) return true;
 
                 List<object> at = new List<object>();
                 foreach (object o in Selector.SelectableObjectsAt(cell, map)) at.Add(o);
