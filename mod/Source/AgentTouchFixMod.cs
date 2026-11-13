@@ -417,10 +417,14 @@ namespace AgentTouchFix
             try { ResidencyFix.Install(); }
             catch (Exception e) { Refl.ErrOnce("resident-fix install failed: " + e); }
 
+            // v27: which stage of the material draw drops these tiles (read-only counters).
+            try { MaterialDrawProbe.Install(); }
+            catch (Exception e) { Refl.ErrOnce("matdraw probe install failed: " + e); }
+
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v26-pendingfix (2.1.1) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
+            Refl.Info("BUILD v27-matdraw (2.1.2) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
 
