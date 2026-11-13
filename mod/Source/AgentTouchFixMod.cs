@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 using HarmonyLib;
 using Verse;
@@ -10,19 +11,29 @@ namespace AgentTouchFix
     {
         internal const string P = "[AgentTouchFix] ";
 
+        private const string LogPath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.log";
+
+        private static void Sink(string level, string m)
+        {
+            try { File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss.fff") + " " + level + " " + m + "\n"); } catch { }
+        }
+
         internal static void Info(string m)
         {
             try { Log.Message(P + m); } catch { }
+            Sink("INFO", m);
         }
 
         internal static void Warn(string m)
         {
             try { Log.Warning(P + m); } catch { }
+            Sink("WARN", m);
         }
 
         internal static void Err(string m)
         {
             try { Log.Error(P + m); } catch { }
+            Sink("ERROR", m);
         }
 
         /// <summary>
