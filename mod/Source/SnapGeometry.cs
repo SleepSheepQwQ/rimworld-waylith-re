@@ -178,6 +178,23 @@ namespace AgentTouchFix
             return found;
         }
 
+        /// <summary>
+        /// v7: the first entry of PortUI's candidate list (the object a tap would act on), as a Thing
+        /// when there is one. Shares the failure counter with Resolve, so a broken invoke is not
+        /// retried forever. Returns null when PortUI answers nothing.
+        /// </summary>
+        internal static object FirstCandidate(object tapPos)
+        {
+            IEnumerable items = Candidates(tapPos);
+            if (items == null) return null;
+            try
+            {
+                foreach (object o in items) return o;
+            }
+            catch (Exception e) { Refl.Warn("candidate scan failed: " + e.Message); }
+            return null;
+        }
+
         /// <summary>Return the accepting rule name, or null when the tap did not aim at this thing.</summary>
         private static string Hits(Thing t, float tapX, float tapZ)
         {

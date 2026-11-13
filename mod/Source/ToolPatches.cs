@@ -65,6 +65,35 @@ namespace AgentTouchFix
             Refl.Info("debug tool cancelled");
         }
 
+        // --- v7: nested pin (the double-tap select-all call needs the same override) -------
+
+        private static bool _savedActive;
+        private static IntVec3 _savedCell;
+        private static object _savedMapPos;
+
+        /// <summary>
+        /// Pin UI.MouseCell()/UI.MouseMapPosition() to a cell for the duration of a vanilla call,
+        /// keeping whatever the outer scope (a running tool click) had pinned.
+        /// </summary>
+        internal static void PushCellPin(IntVec3 cell, object mapPos)
+        {
+            _savedActive = _overrideActive;
+            _savedCell = _overrideCell;
+            _savedMapPos = _overrideMapPos;
+
+            _overrideCell = cell;
+            if (mapPos != null) _overrideMapPos = mapPos;
+            _overrideActive = true;
+        }
+
+        internal static void PopCellPin()
+        {
+            _overrideCell = _savedCell;
+            _overrideMapPos = _savedMapPos;
+            _overrideActive = _savedActive;
+            _savedMapPos = null;
+        }
+
         private static void ClearTool()
         {
             try { _fCurTool?.SetValue(null, null); }
@@ -350,13 +379,20 @@ namespace AgentTouchFix
         /// The actual fix: PortUI calls Tap() for every map tap. If a dev tool is armed we
         /// consume the tap ourselves (fire the tool / cancel on long press) and skip the
         /// selection logic entirely.
+        ///
+        /// v7: with no tool armed, a double tap on a *building* is handled here as well, because
+        /// PortUI's own double tap branch only ever matches ThingCategory.Item.
         /// </summary>
         internal static bool Tap_Prefix(object[] __args)
         {
             if (__args == null || __args.Length == 0) return true;
             try
             {
-                if (CurTool == null) return true;
+                if (CurTool == null)
+                {
+                    // no dev tool armed: the only case we take over is a building double tap
+                    return !DoubleTapSelect.TryConsume(__args);
+                }
 
                 bool longPress = false;
                 if (__args.Length > 1)

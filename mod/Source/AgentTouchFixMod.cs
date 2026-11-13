@@ -333,6 +333,30 @@ namespace AgentTouchFix
             Add("RwHost.ClassicTouchControls.OnTouch", () => Refl.M(Refl.TPrefer("RwHost", "RwHost.ClassicTouchControls"), "OnTouch"),
                 MI(typeof(TooltipPatches), "Touch_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
+            // v7 A: a memory-pressure event used to release the decoded texture staging buffers
+            // twice (game boundary + the next render boundary), and the second one landed on the
+            // frame that consumes the uploads -> grey / flickering textures. The render side is
+            // suppressed for 500 ms after a real game-side release; renderTrim keeps its value, so
+            // the render trim is deferred, never lost.
+            Add("RwHost.AndroidMemoryAndGcGovernor.GameBoundary",
+                () => Refl.M(GovernorPatches.T(), "GameBoundary"),
+                MI(typeof(GovernorPatches), "GameBoundary_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            Add("RwHost.AndroidMemoryAndGcGovernor.RenderBoundary",
+                () => Refl.M(GovernorPatches.T(), "RenderBoundary"),
+                MI(typeof(GovernorPatches), "RenderBoundary_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            // v7 C: the IME answer is dropped whenever the field's TextEditTarget changed geometry
+            // between opening the editor and the callback (Chinese input hits this almost every
+            // time). Postfix only: the exact match keeps priority, the relaxed one is same-window,
+            // single-shot.
+            Add("PortUI.Ports1de.TextEditMailbox.TryTake",
+                () => Refl.M(TextInputPatches.MailboxType(), "TryTake"),
+                null, MI(typeof(TextInputPatches), "TryTake_Postfix"), -1, ref ok, ref skipped, ref failed);
+
+            // v7 B needs no patch of its own: MobileSelectionController.Tap is already patched above
+            // and ToolPatches.Tap_Prefix now also takes over a building double tap.
+
             string summary = "patch summary: ok=" + ok + " skipped=" + skipped + " failed=" + failed;
             // v5: silent by default. Only a real patch failure reaches the in-game dialog, and only
             // once per process; everything else lives in agenttouchfix.log.
@@ -347,7 +371,7 @@ namespace AgentTouchFix
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v6-snaptip (1.4.0) - hit-tested tap snapping (always/auto/off) + touch-mode tooltip suppression with long press passthrough");
+            Refl.Info("BUILD v7-txtsel (1.5.0) - single texture trim per memory-pressure event + building double-tap select-all + same-window IME text recovery; v6 snapping (always/auto/off) and tooltip suppression unchanged");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
         }
