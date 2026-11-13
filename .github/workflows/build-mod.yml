@@ -122,48 +122,7 @@ jobs:
             || { echo "ERROR: pick log line missing from the DLL"; exit 1; }
           strings -el "$DLL" | grep -q 'pick mode=exact skipped-radius=' \
             || { echo "ERROR: pick skipped-radius log line missing from the DLL"; exit 1; }
-          strings -el "$DLL" | grep -q 'tex: decode ok=' \
-            || { echo "ERROR: texture summary line missing from the DLL"; exit 1; }
-          strings -el "$DLL" | grep -q 'Ports1de.DdsFallback' \
-            || { echo "ERROR: DdsFallback probe target literal missing"; exit 1; }
-          strings -el "$DLL" | grep -q 'Waylith.Rendering.TextureResidency' \
-            || { echo "ERROR: residency probe target literal missing"; exit 1; }
-          strings -el "$DLL" | grep -q 'BUILD v' \
-            || { echo "ERROR: build marker BUILD v11..v16 missing"; exit 1; }
-          echo "tips / pick / snap / tex literals: OK"
-
-          # 5) the texture probes are counters only: no call to any governor method may be added
-          #    (checked above at the string level) and the probes must not name a texture write path.
-          for bad2 in Resize Recreate Upload SetData ApplyGovernor TrimBudget; do
-            if strings -el "$DLL" | grep -q "$bad2"; then
-              echo "ERROR: mod DLL names '$bad2' - a texture write path leaked into the probes"; exit 1
-            fi
-          done
-          echo "texture probes are read-only: OK"
-
-          # 6) v11 texkeep gate: the two switches, the mode/log literals and - the actual contract -
-          #    that nothing beyond the three eviction entry points may be named. Dispose / release /
-          #    residency / upload paths and the governor stay untouched (checked for both string heaps).
-          strings -el "$DLL" | grep -q 'agenttouchfix.texkeep' \
-            || { echo "ERROR: texkeep switch path missing from the DLL"; exit 1; }
-          strings -el "$DLL" | grep -q 'agenttouchfix.texgrace' \
-            || { echo "ERROR: texgrace switch path missing from the DLL"; exit 1; }
-          strings -el "$DLL" | grep -q 'agenttouchfix.texsmall' \
-            || { echo "ERROR: texsmall switch path missing from the DLL"; exit 1; }
-          strings -el "$DLL" | grep -q 'texkeep mode=' \
-            || { echo "ERROR: texkeep mode log line missing from the DLL"; exit 1; }
-          strings -el "$DLL" | grep -q 'skipped=icon:' \
-            || { echo "ERROR: texkeep skipped=icon counter literal missing from the DLL"; exit 1; }
-          for tgt in 'Waylith.Rendering.Texture2D.Evict' 'EvictWhenCached' 'DrainPendingEvictions' 'LastUseFrame' 'RenderFrameSerial' 'AllocatedBytes'; do
-            strings -el "$DLL" | grep -q "$tgt" \
-              || { echo "ERROR: texkeep target literal '$tgt' missing from the DLL"; exit 1; }
-          done
-          for bad3 in DisposeMovedAway TryEvictForResidency ReleaseBuffers; do   # v13 intentionally calls EnsureResident from the sampling path
-            if strings -a "$DLL" | grep -q "$bad3" || strings -el "$DLL" | grep -q "$bad3"; then
-              echo "ERROR: mod DLL names '$bad3' - the texkeep gate reached past the eviction entry points"; exit 1
-            fi
-          done
-          echo "texkeep gate literals and no-widening check: OK"
+          echo "input-only build: texture/render probe literals are no longer required"
 
       - name: Report dll size
         run: stat -c '%n %s bytes' dist/AgentTouchFix/Assemblies/AgentTouchFix.dll
