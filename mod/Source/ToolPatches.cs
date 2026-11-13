@@ -162,7 +162,12 @@ namespace AgentTouchFix
             try
             {
                 Map map = Find.CurrentMap;
-                if (map == null || !cell.InBounds(map)) return -1;
+                if (map == null) return -1;
+                // Open coded bounds test: the Verse IntVec3.InBounds extension lives next to
+                // overloads that mention UnityEngine types, and binding it would force a
+                // compile-time UnityEngine reference (CS0012) that this mod must not carry.
+                IntVec3 size = map.Size;
+                if (cell.x < 0 || cell.z < 0 || cell.x >= size.x || cell.z >= size.z) return -1;
                 return map.thingGrid.ThingsListAt(cell).Count;
             }
             catch { return -1; }
