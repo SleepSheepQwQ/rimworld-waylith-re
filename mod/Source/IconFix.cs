@@ -30,7 +30,9 @@ namespace AgentTouchFix
 
         private static FieldInfo _fUiIcon, _fGraphic, _fDefName, _fMat;
         private static bool _noMaterial = true;
+        private static bool _useCore = true;
         private static int _matCleared;
+        private static int _coreSwapped;
         private static MethodInfo _finder;          // ContentFinder<Texture2D>.Get(string, bool)
         private static FieldInfo _fPath;            // Graphic.path
 
@@ -45,6 +47,19 @@ namespace AgentTouchFix
                 // v20: build icons that carry a uiIconMaterial (CutoutComplexUI) flicker on this
                 // port, while the ones without a material draw fine from their plain texture.
                 // Drop the material so the UI uses the plain texture path.
+                // v21: the wrapper's real pixels live on CoreTexture (uiIcon itself has no GPU data).
+                // Point uiIcon at the core texture first, so the plain draw path has something to show.
+                if (_useCore)
+                {
+                    object w = _fUiIcon.GetValue(__instance);
+                    object c = CoreOf(w);
+                    if (c != null && !ReferenceEquals(c, w))
+                    {
+                        _fUiIcon.SetValue(__instance, c);
+                        Interlocked.Increment(ref _coreSwapped);
+                    }
+                }
+
                 if (_noMaterial && _fMat != null)
                 {
                     object mat = _fMat.GetValue(__instance);
@@ -90,6 +105,20 @@ namespace AgentTouchFix
             catch (Exception e) { WarnOnce("ResolveIcon postfix: " + e.Message); }
         }
 
+
+        /// <summary>Texture2D.CoreTexture, ambiguity-safe (the property exists on the type and its base).</summary>
+        private static object CoreOf(object tex)
+        {
+            if (tex == null) return null;
+            try
+            {
+                foreach (PropertyInfo p in tex.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    if (p.Name == "CoreTexture" && p.GetIndexParameters().Length == 0) return p.GetValue(tex, null);
+            }
+            catch { }
+            return null;
+        }
+
         private static void Resolve(Type t)
         {
             _fUiIcon = t.GetField("uiIcon", BindingFlags.Public | BindingFlags.Instance);
@@ -129,7 +158,7 @@ namespace AgentTouchFix
                     string v = (File.ReadAllText(sw) ?? "").Trim().ToLowerInvariant();
                     _noMaterial = !(v.StartsWith("keep") || v == "off" || v == "0");
                 }
-                Refl.Info("iconfix: uiIconMaterial " + (_noMaterial ? "cleared (plain texture path)" : "kept (shipped)"));
+                Refl.Info("iconfix: uiIconMaterial " + (_noMaterial ? "cleared" : "kept") + ", uiIcon->CoreTexture " + (_useCore ? "on" : "off") + " (plain texture path)");
             }
             catch (Exception e) { Refl.Warn("iconfix: iconmat switch: " + e.Message); }
 
