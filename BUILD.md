@@ -7,10 +7,10 @@ Harmony fix mod for the RimWorld 1.7 Android port `com.ports1de.waylith` (Waylit
 |---|---|
 | mod name / folder | `AgentTouchFix` (`Mods/AgentTouchFix`) |
 | packageId | `sleepsheep.waylith.agenttouchfix` |
-| version | 1.0.0 |
+| version | 1.4.0 (this file's section 8) |
 | target framework | `net10.0` (same as `Assembly-CSharp.dll`, verified: `TargetFrameworkAttribute = .NETCoreApp,Version=v10.0`) |
-| mod DLL | `Assemblies/AgentTouchFix.dll`, **20,480 bytes** (md5 `f5983f9f63c5945608a84a9618ebefb4`) |
-| built by | GitHub Actions run **43440517642** (`.github/workflows/build-mod.yml`), `dotnet build -c Release` on `ubuntu-latest` with .NET SDK 10.0.x |
+| mod DLL (v6) | `Assemblies/AgentTouchFix.dll`, **48,128 bytes** (md5 `ffc51b6cf1f4bb69d306640bc08c374f`); v1.0.0 was 20,480 B |
+| built by | GitHub Actions run **43458414120** (v6; the v1.0.0 build was 43440517642) (`.github/workflows/build-mod.yml`), `dotnet build -c Release` on `ubuntu-latest` with .NET SDK 10.0.x |
 | result | build **success**, 0 warnings, 0 errors |
 | artifact | `AgentTouchFix.zip` (10,591 B) → staged here as `~/.hermes/cache/scratch/agenttouchfix/AgentTouchFix.zip` |
 
@@ -323,3 +323,97 @@ files/game/agenttouchfix.diag      # create an empty file, restart the game
   `if (!Refl.DiagOn) return;`, so a disabled build costs zero per-event work: no Harmony hop, no
   string building, no reflection, no file write.
 * Read once, in `Bootstrap`, before the first patch is applied — toggling needs a restart.
+
+## 8. v6-snaptip build (version 1.4.0) — tighter snapping + tooltip suppression
+
+Two user reports on v5:
+
+1. *"the snap radius is too big"* — tapping empty terrain next to a wall or a dropped item put the
+   tool on the item, so clear-terrain / spawn tools kept hitting the wrong cell;
+2. *"the hover text stays on screen after a touch"* — the tooltip covers the button labels.
+
+### 8.1 Snapping is now hit tested (`SnapGeometry.cs`)
+
+`PortUI.MobileSelectionController.Candidates(Vector3)` (tap position → `List<object>`, exact cell
+first, then the 5x5 neighbourhood inside 28.8 px, nearest first) is still the source of candidates,
+but it is only a **proposal**: `SnapGeometry.Resolve` accepts the first candidate that passes
+
+* **(a) footprint** — the tapped map position lies inside `GenAdj.OccupiedRect(thing)` (the thing's
+  own cells, i.e. what its graphic covers), or
+* **(b) proximity** — the tapped point is at most **16 dp** away from the projected screen position
+  of `Thing.DrawPos`, where the radius is also capped at **half a cell on screen**, so zooming out
+  can never widen the snap into neighbouring cells (`min(16 * dpi/160, 0.5 * cellPx)`, floor 6 px,
+  ceiling 64 px).
+
+Nothing passes → the raw tap is used (exact position for `UI.MouseMapPosition`, floor cell for
+`UI.MouseCell`). If PortUI offered **no** candidate at all and `Find.Selector.SingleSelectedThing`
+is set, that thing is targeted instead (tools that answer to the selection).
+
+Also fixed: the tap → cell conversion used `Math.Round`, so a tap at 123.7 landed in cell **124**.
+It now floors (matching `UI.MouseMapPosition().ToIntVec3()`), which on its own removed a whole class
+of "empty ground, neighbouring item" snaps.
+
+Screen projection is pure reflection (`Verse.Find.Camera` → `Camera.WorldToScreenPoint`, screen y
+flipped with `Camera.pixelHeight`, density from `UnityEngine.Screen.dpi`) — the mod still carries no
+compile-time `UnityEngine` / `PortUI` / `RwHost` reference, and the CI guard still passes.
+
+### 8.2 Mode switch
+
+```
+files/game/agenttouchfix.snap
+```
+
+| content | behaviour |
+| --- | --- |
+| `auto` (or file absent) | the hit test above — **default** |
+| `always` | v5 behaviour: nearest candidate wins, no hit test |
+| `off` | never snap: exact tap position + floored cell |
+| anything else | one WARN line, `auto` |
+
+Read once in `Bootstrap` (`SnapGeometry.ReadMode`), logged as
+`snap mode=auto (…/agenttouchfix.snap = 'auto')` plus one line with the density scale
+(`snap: density scale 2.5 (400 dpi) -> 16dp = 40px before the half cell cap`).
+
+Per tap the log now shows the decision:
+
+```
+tool fire tap=(123.4,45.1) cell=(123,45) things=0 snap=auto
+tool snap -> Steel at (124,0,45) (near 9.6/24.0px)
+tool snap none - using the raw tap
+debug tool fired at (123,0,45) (raw tap)
+```
+
+### 8.3 Tooltips (`TooltipPatches.cs`)
+
+`Verse.TooltipHandler` registers a tip when `Event.current.type == Repaint && Mouse.IsOver(rect)`,
+and the port parks the cursor on the last tap, so that condition is true forever. The mod now
+prefixes **all six** `TipRegion` / `TipRegionByKey` overloads of this build (2 × `TipRegion`,
+4 × `TipRegionByKey`) with one **parameterless** `bool` prefix (returning `false` skips only the
+registration; `Event.current.Use()` is never called, so surrounding GUI is untouched):
+
+| state | result |
+| --- | --- |
+| no touch event for 2 s | unchanged (desktop / real mouse) |
+| finger held ≥ 600 ms | tip allowed — long press asks for the description |
+| ≤ 1500 ms since the last tap / pointer still parked | suppressed |
+
+Timestamps are fed from **both** touch chains: `RwHost.TouchControls.OnTouch` (modern, patched since
+v3) and `RwHost.ClassicTouchControls.OnTouch` (new patch, timestamp only — `mobile-controls.txt`
+without bit 2 uses the classic chain and would otherwise never be seen). "Parked" means
+`Input.mousePosition` has not moved for 300 ms, sampled once per frame, so a real mouse that moves
+ends the suppression immediately. One log line per 10 s: `tooltip: N tip(s) suppressed in touch mode`.
+
+The binding mechanism (one parameterless prefix on differently shaped overloads, skip on `false`,
+normal on `true`) is exercised in CI by `tests/HarmonyProbe` (`OVERLOAD PROBE OK`).
+
+### 8.4 Build
+
+* commits `bec67a5` (mod) / `7fc0376` (probe) / `f5db8e2` (empty-Candidates rule), run **43458414120**,
+  `dotnet build -c Release`:
+  **0 warnings, 0 errors**, reference guard + engine-pin literals OK.
+* `Assemblies/AgentTouchFix.dll` **48,128 bytes**, md5 `ffc51b6cf1f4bb69d306640bc08c374f`
+  (successive v6 builds differ only in the PE timestamp / MVID / checksum, ~94 bytes; the IL is
+  identical).
+* artifact staged at `~/.hermes/cache/scratch/agenttouchfix/v6/AgentTouchFix-v6.zip`
+  (zip md5 `37dac204647d006cc19eb1e1cb0b9272`, 22,264 B), unzipped next to it in `v6/AgentTouchFix/`.
+* **not deployed** — v5 is still what runs on the device.
