@@ -3,7 +3,7 @@
   <name>AgentTouchFix</name>
   <author>SleepSheepQwQ</author>
   <packageId>sleepsheep.waylith.agenttouchfix</packageId>
-  <modVersion>1.7.0</modVersion>
+  <modVersion>1.8.0</modVersion>
   <supportedVersions>
     <li>1.7</li>
   </supportedVersions>
@@ -54,6 +54,8 @@
      auto   (default, also used when the file is absent) - the hit test above
      always - old behaviour: snap to the nearest candidate no matter how far the tap was
      off - never snap; the exact tapped cell and position are used
+   This switch governs the developer-tool path only (an armed LudeonTK tool firing on a map tap).
+   Ordinary map taps are answered by PortUI's own candidate picker - see item 10 for that one.
 
 5) Tooltips no longer stick to the touch point (v9). The real cause was the virtual cursor: the
    port's tap path calls Click(), which pushes the cursor position onto the tapped button and never
@@ -105,9 +107,47 @@
    went up is released, exactly as the port already does for a second button on a pointer-up; the
    ordinary single button release is handled by the unmodified game code.
 
-Nothing under RwHost.AndroidMemoryAndGcGovernor is patched, and no texture or memory path is touched
-(v9): the grey / flickering / scrambled textures came from the port itself (quality tier falling to
-Economy, a 32 MiB decoded-texture budget, BC sampling through software decode), not from the mod.
+10) A tap on empty ground no longer jumps to the nearest entity (v10).
+   The tap is not the mod's: PortUI.MobileSelectionController.Candidates answers a tap with what is
+   on that cell and, when the cell holds nothing, additionally scans the 5x5 cells around it and
+   inserts everything within 28.8 px of the finger in front of the cell's own contents, nearest
+   first. That radius search is what the player feels as "I tapped the ground and it grabbed the
+   item / pawn next to it".
+   Switch (read once at startup), files/game/agenttouchfix.pick:
+     port  (default, also used when the file is absent) - untouched, exactly as shipped
+     exact - when the tapped cell itself holds no selectable Thing, that radius search is skipped and
+             the candidate list is just what is really on the cell (usually nothing), so the tap
+             stays where the finger was. A cell that does hold something is handled by the original
+             method, unchanged.
+   The switch touches only that one branch: it never rewrites arguments and never bypasses the
+   original in the branch it does not own. Log: `pick mode=exact skipped-radius=N` (at most one line
+   per 2 s) plus the startup line `pick mode=<mode> (...)`.
+   Independent of the developer-tool snapping in item 4: an armed tool still snaps onto the entity
+   under the finger, which is what makes terrain and spawn tools usable.
+
+11) Read-only texture counters for the grey / flickering / scrambled texture fault (v10).
+   A diagnostic build cannot fix that fault blind, so this version counts what the texture paths
+   actually do. Every one of these patches only reads and increments - no argument is changed, no
+   result is written, and no governor / memory method is patched.
+   - Ports1de.DdsFallback.TryPlan: the decoded-texture budget and maxDimension the caller asked for,
+     and (postfix) the plan's Format / Width / Height / Shift / SourceMip.
+   - Ports1de.DdsFallback.TryConvert: whether the software decode succeeded and how many bytes the
+     converted DDS took (used). If the plan postfix cannot be installed, the mip shift is derived
+     from the input vs. converted pixel width instead.
+   - Waylith.Rendering.Texture2D.Evict, GpuTextureService.GetOrCreateFallbackTexture,
+     TextureResidency.Offload and TextureResidency.EvictHostResident: how often a texture is
+     evicted, how often the 1x1 stand-in colour is handed out, and how often residency moves
+     textures out or evicts the host-resident copies.
+   Every 30 s one line is appended to files/game/agenttouchfix.log (file only, never Verse.Log):
+     tex: decode ok=N shift>0=N fail=N fallback=N evict=N offload=N budget=<MiB> limit=<px> hostevict=N
+   plus one detail line the first time a down-shifted plan appears and the first time a decode
+   fails (format code, input size, shift, budget, limit). The patch summary line
+   `tex: probes ok=.. skipped=.. failed=..` says whether the counters could be installed at all.
+
+Nothing under RwHost.AndroidMemoryAndGcGovernor is patched, and no texture or memory path is written
+(v9, unchanged in v10): the grey / flickering / scrambled textures came from the port itself (quality
+tier falling to Economy, a small decoded-texture budget, BC sampling through software decode), not
+from the mod. The v10 texture patches are read-only counters installed to prove exactly that.
 
 Everything is registered with AccessTools and fails soft: a missing target is recorded in the log
 file and the rest of the patches stay active. Nothing is patched permanently outside these

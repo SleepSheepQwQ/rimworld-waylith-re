@@ -887,3 +887,79 @@ absent `Diag.Install()` returns before patching anything.
   disappears on release; move a real mouse → tooltips behave normally; capture a region with a dev
   tool → the park must not shift the click (if taps land wrong, set `agenttouchfix.tips` to
   `suppress` and re-test, that isolates the native push from everything else).
+
+## 12. v10-texprobe build (version 1.8.0-diag) — one behaviour switch, read-only texture counters
+
+Two changes only; every v9 fix is untouched.
+
+### 12.1 Why the snap switch was *not* turned off
+
+The first draft of this version planned to default `agenttouchfix.snap` to `off`. That is wrong:
+snap is the **developer-tool** path (`ToolPatches.Fire` → `SnapGeometry.Resolve`), and without it an
+armed tool cannot be aimed at an entity at a zoomed-out phone view. Default stays `auto`.
+
+The "I tapped the ground and it grabbed the nearest item" report has a different source:
+`PortUI.MobileSelectionController.Candidates` answers a tap with `Selector.SelectableObjectsAt(cell)`
+and, when that cell holds no `Thing`, additionally scans `CellRect.CenteredOn(cell, 2)` and *inserts*
+every `Thing` within 28.8 px of the tap **in front of** the cell's own contents, nearest first. So a
+tap on empty ground never stays on empty ground.
+
+### 12.2 New: `files/game/agenttouchfix.pick` (`port` default / `exact`)
+
+`PickMode.Candidates_Prefix<T>` (generic, closed over `UnityEngine.Vector3` exactly like the
+`MouseMapPosition` prefix — the mod still has no UnityEngine reference) is a prefix on `Candidates`:
+
+* `exact` + the tapped cell's own selectables contain **no** `Thing` → return that (usually empty)
+  list and skip the original: the 5×5 / 28.8 px radius search never runs. The cell is computed the
+  same way the original computes it (`IntVec3(Vector3)` truncates, it does not round).
+* every other case (mode `port`, cell holds something, unknown position, no map, out of bounds, any
+  exception) → `return true`, the original runs untouched.
+
+The prefix is installed in both modes so the log always names the live mode; in `port` it returns
+immediately. Arguments are never rewritten, and the branch it does not own is never bypassed.
+
+Log: `pick mode=exact skipped-radius=N` (at most one line per 2 s, N = session total) and the startup
+line `pick mode=<mode> (...)`.
+
+### 12.3 New: read-only texture counters (`TexProbe.cs`)
+
+Feature-gated by nothing (they are counters on cold paths, not the diag flag). Each patch reads and
+increments only — no `__result` is written, no argument is modified, and **no governor / memory
+method is patched** (the v9 rule and its CI guard are unchanged).
+
+| target | patch | recorded |
+|---|---|---|
+| `Ports1de.DdsFallback.TryPlan` | prefix (`int budget, int maxDimension`) | requested budget + dimension cap |
+| `Ports1de.DdsFallback.TryPlan` | postfix (`bool __result, object plan`) | plan `Format/Width/Height/Shift/SourceMip` |
+| `Ports1de.DdsFallback.TryConvert` | postfix (`object[] __args, bool __result`) | success, `used` bytes, in/out header |
+| `Waylith.Rendering.Texture2D.Evict` | parameterless prefix | evictions |
+| `Waylith.Rendering.GpuTextureService.GetOrCreateFallbackTexture` | parameterless prefix | 1×1 stand-in handed out |
+| `Waylith.Rendering.TextureResidency.Offload` | parameterless prefix | offload passes |
+| `Waylith.Rendering.TextureResidency.EvictHostResident` | parameterless prefix | host-resident evictions |
+
+`object plan` is how the out parameter is read without naming `Ports1de.DdsFallback.Plan` (internal
+to `RwHost.dll`); if that shape is ever rejected the postfix is skipped with a `WARN` and the mip
+shift is derived from the input vs. converted pixel width instead, so the summary keeps working.
+
+Every 30 s (`System.Threading.Timer`, root-held static field) one line into
+`files/game/agenttouchfix.log` — file only, never `Verse.Log`:
+
+```
+tex: decode ok=N shift>0=N fail=N fallback=N evict=N offload=N budget=<MiB> limit=<px> hostevict=N plan=<ok>/<fail>
+```
+
+plus two one-off detail lines: the first down-shifted plan (`tex detail shift>0: plan format=… WxH
+shift=… srcMip=… budget=… limit=…`) and the first failed decode (`tex detail decode-fail: format=…
+WxH mips=… bytes=… budget=… limit=…`). `tex: probes ok=… skipped=… failed=… planpostfix=on|off`
+records what could be installed.
+
+### 12.4 Probe coverage in CI
+
+`tests/HarmonyProbe` gained four shape probes, so none of the above is assumed:
+
+| probe | proves |
+|---|---|
+| span/plan | a prefix+postfix can be installed on a `ReadOnlySpan<byte>` method; named `int` parameters bind; `object` receives an `out` reference-type parameter; `__result` is visible |
+| args | a postfix may read every argument, including two `out` values, through `object[] __args` |
+| pick | a generic prefix closed over the position struct can replace `List<object>` and skip the original, and reads the boxed position correctly |
+| evict | a parameterless prefix on an instance method counts without disturbing the body |

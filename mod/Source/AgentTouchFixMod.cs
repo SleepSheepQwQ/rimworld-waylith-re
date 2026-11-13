@@ -301,6 +301,10 @@ namespace AgentTouchFix
             // v9: the tooltip switch (park / suppress / off), read once, same folder.
             TipMode.ReadMode();
 
+            // v10: the PortUI candidate switch (port / exact), read once, same folder. Independent
+            // of the snap switch: snap only governs the developer tool path.
+            PickMode.ReadMode();
+
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
             Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
@@ -308,6 +312,14 @@ namespace AgentTouchFix
 
             Add("PortUI.MobileSelectionController.Tap", () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Tap"),
                 MI(typeof(ToolPatches), "Tap_Prefix"), null, -1, ref ok, ref skipped, ref failed);
+
+            // v10: pick=exact drops PortUI's 28.8 px / 5x5 radius search when the tapped cell itself
+            // holds nothing selectable. Prefix only, and only that one branch is replaced - see
+            // PickMode. Installed in both modes (in port mode it returns immediately) so the log
+            // always shows which mode is live.
+            Add("PortUI.MobileSelectionController.Candidates",
+                () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Candidates"),
+                PickPrefix(), null, -1, ref ok, ref skipped, ref failed);
 
             Add("Verse.UI.MouseCell", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseCell"),
                 MI(typeof(ToolPatches), "MouseCell_Prefix"), null, 700, ref ok, ref skipped, ref failed);
@@ -398,9 +410,15 @@ namespace AgentTouchFix
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v9-notex (1.7.0) - no memory / texture governor patch of any kind (the v7 render-trim skip and the v8 UI-hidden trim answer are removed); tooltips are switchable via files/game/agenttouchfix.tips (park [default, cursor pushed off screen after the last finger up] / suppress / off) with a 500 ms hold allowance and an 800 ms post-release allowance; everything else from v8 (tap snapping, building double-tap select-all, IME text recovery, focus-loss mouse/key release, ACTION_UP per-button release, SecondUp reset, file-only 1 MB log) is unchanged");
+            Refl.Info("BUILD v10-texprobe (1.8.0-diag) - v9 behaviour kept in full (tips park/suppress/off, developer-tool tap snapping via files/game/agenttouchfix.snap, building double-tap select-all, IME text recovery, focus-loss mouse/key release, ACTION_UP per-button release, SecondUp reset, file-only 1 MB log, NO memory/texture governor patch); NEW: files/game/agenttouchfix.pick (port [default] / exact - exact drops PortUI's 28.8 px radius search when the tapped cell holds nothing, so a tap on empty ground no longer jumps to the nearest entity; the dev-tool snap is unaffected) and read-only texture counters (DdsFallback.TryPlan/TryConvert, Texture2D.Evict, GpuTextureService.GetOrCreateFallbackTexture, TextureResidency.Offload/EvictHostResident) summarised every 30 s as 'tex: decode ok=.. shift>0=.. fail=.. fallback=.. evict=.. offload=.. budget=.. limit=..'");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
+
+            // v10: read-only texture counters. Always installed (not gated by the diag flag), and
+            // they cannot change rendering: every one of them only reads and counts.
+            try { TexProbe.Install(); }
+            catch (Exception e) { Refl.ErrOnce("tex probe install failed: " + e); }
+
         }
 
         /// <summary>
@@ -430,6 +448,42 @@ namespace AgentTouchFix
             catch (Exception e)
             {
                 Refl.Warn("UI.MouseMapPosition prefix could not be built: " + e.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// PortUI.MobileSelectionController.Candidates(Vector3) -> List&lt;object&gt;. Same trick as
+        /// MouseMapPositionPrefix: the parameter is UnityEngine.Vector3, which this mod refuses to
+        /// reference at compile time, so PickMode.Candidates_Prefix&lt;T&gt; is closed over the live
+        /// parameter type here and really takes '(UnityEngine.Vector3, ref List&lt;object&gt;)'.
+        /// </summary>
+        private static MethodInfo PickPrefix()
+        {
+            try
+            {
+                MethodBase target = Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Candidates");
+                if (target == null) return null;
+                ParameterInfo[] ps = target.GetParameters();
+                if (ps.Length != 1)
+                {
+                    Refl.Warn("pick: Candidates has " + ps.Length + " parameters (1 expected) - pick switch not installed");
+                    return null;
+                }
+                MethodInfo open = typeof(PickMode).GetMethod("Candidates_Prefix",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (open == null || !open.IsGenericMethodDefinition)
+                {
+                    Refl.Warn("pick: Candidates_Prefix missing or not generic - pick switch not installed");
+                    return null;
+                }
+                MethodInfo closed = open.MakeGenericMethod(ps[0].ParameterType);
+                Refl.Info("pick: Candidates prefix closed over " + ps[0].ParameterType.FullName);
+                return closed;
+            }
+            catch (Exception e)
+            {
+                Refl.Warn("pick: Candidates prefix could not be built: " + e.Message);
                 return null;
             }
         }

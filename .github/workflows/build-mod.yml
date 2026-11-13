@@ -83,7 +83,7 @@ jobs:
             || { echo "ERROR: engine patch target literal missing"; exit 1; }
           echo "reference check OK"
 
-      - name: Verify no governor / texture patch (v9)
+      - name: Verify no governor / texture patch (v9), v10 switches and probe literals
         run: |
           set -euo pipefail
           DLL=dist/AgentTouchFix/Assemblies/AgentTouchFix.dll
@@ -111,9 +111,35 @@ jobs:
             || { echo "ERROR: tips switch path missing from the DLL"; exit 1; }
           strings -el "$DLL" | grep -q 'tips mode=' \
             || { echo "ERROR: tips log line missing from the DLL"; exit 1; }
-          strings -el "$DLL" | grep -q 'BUILD v9-notex' \
-            || { echo "ERROR: build marker BUILD v9-notex missing"; exit 1; }
-          echo "tips switch literals: OK"
+
+          # 4) v10: the snap switch is unchanged (auto by default, developer-tool path only) and the
+          #    new pick switch plus the texture probe must actually be in the binary.
+          strings -el "$DLL" | grep -q 'agenttouchfix.snap' \
+            || { echo "ERROR: snap switch path missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'agenttouchfix.pick' \
+            || { echo "ERROR: pick switch path missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'pick mode=' \
+            || { echo "ERROR: pick log line missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'pick mode=exact skipped-radius=' \
+            || { echo "ERROR: pick skipped-radius log line missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'tex: decode ok=' \
+            || { echo "ERROR: texture summary line missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'Ports1de.DdsFallback' \
+            || { echo "ERROR: DdsFallback probe target literal missing"; exit 1; }
+          strings -el "$DLL" | grep -q 'Waylith.Rendering.TextureResidency' \
+            || { echo "ERROR: residency probe target literal missing"; exit 1; }
+          strings -el "$DLL" | grep -q 'BUILD v10-texprobe' \
+            || { echo "ERROR: build marker BUILD v10-texprobe missing"; exit 1; }
+          echo "tips / pick / snap / tex literals: OK"
+
+          # 5) the texture probes are counters only: no call to any governor method may be added
+          #    (checked above at the string level) and the probes must not name a texture write path.
+          for bad2 in Resize Recreate Upload SetData ApplyGovernor TrimBudget; do
+            if strings -el "$DLL" | grep -q "$bad2"; then
+              echo "ERROR: mod DLL names '$bad2' - a texture write path leaked into the probes"; exit 1
+            fi
+          done
+          echo "texture probes are read-only: OK"
 
       - name: Report dll size
         run: stat -c '%n %s bytes' dist/AgentTouchFix/Assemblies/AgentTouchFix.dll
