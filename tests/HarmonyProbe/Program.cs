@@ -112,7 +112,7 @@ namespace HarmonyProbe
 
             // v10 shapes: the read-only texture counters and the pick switch rely on these.
             fail += ProbeSpanPlan();
-            fail += ProbeArgsPostfix();
+            fail += ProbeConvertPostfix();
             fail += ProbeGenericSkipPrefix();
             fail += ProbeParameterlessInstancePrefix();
 
@@ -246,17 +246,52 @@ namespace HarmonyProbe
             }
         }
 
+        /// <summary>Second copy of the same converter shape, patched with the naive __args variant.</summary>
+        internal static class ArgsStub
+        {
+            public static bool TryConvert(byte[] input, int length, int budget, Func<int, int> decoder,
+                out byte[] converted, out int used, object pool = null, int maxDimension = 8192)
+            {
+                converted = null;
+                used = 0;
+                if (input == null || length <= 0 || length > input.Length) return false;
+                converted = new byte[length];
+                used = length;
+                return true;
+            }
+        }
+
         internal static class ConvPatches
         {
             internal static int Calls;
-            internal static object[] Args;
+            internal static bool Result;
+            internal static byte[] SeenConverted;
+            internal static int SeenUsed = -1, SeenBudget = -1, SeenDim = -1, SeenLength = -1;
+
+            // Same shape as TexProbe.TryConvert_Postfix: bound by name, the two out values declared
+            // ref so Harmony hands over the post-call values, and never assigned here.
+            internal static void Postfix(bool __result, byte[] input, int length, int budget,
+                ref byte[] converted, ref int used, int maxDimension)
+            {
+                Calls++;
+                Result = __result;
+                SeenConverted = converted;
+                SeenUsed = used;
+                SeenBudget = budget;
+                SeenDim = maxDimension;
+                SeenLength = length;
+            }
+        }
+
+        internal static class ArgsPatches
+        {
+            internal static int Calls;
             internal static bool Result;
 
-            // Same shape as TexProbe.TryConvert_Postfix.
+            // The variant TexProbe deliberately does NOT use. Kept so the reason is reproducible.
             internal static void Postfix(object[] __args, bool __result)
             {
                 Calls++;
-                Args = __args;
                 Result = __result;
             }
         }
@@ -371,51 +406,75 @@ namespace HarmonyProbe
         }
 
         /// <summary>Postfix reading every argument (including both out values) through __args.</summary>
-        private static int ProbeArgsPostfix()
+        /// <summary>
+        /// TryConvert postfix, bound by parameter NAME. Proves that the two out values reach the
+        /// postfix AND that the caller still gets them back afterwards - a postfix that only reads
+        /// must never disturb `converted` / `used`, because TryConvert's whole job is to hand the
+        /// decoded buffer to AndroidFixes.
+        ///
+        /// The naive object[] __args variant is exercised on a second copy of the method and only
+        /// reported (no assertion): Harmony builds __args before the call and writes it back over
+        /// the arguments afterwards, so a postfix that does not rewrite __args gives the caller the
+        /// pre-call values (converted = null, used = 0). That is why TexProbe does not use it.
+        /// </summary>
+        private static int ProbeConvertPostfix()
         {
             int fail = 0;
-            Harmony harmony = new Harmony("probe.sleepsheep.agenttouchfix.argspostfix");
+            Harmony harmony = new Harmony("probe.sleepsheep.agenttouchfix.convertpostfix");
             MethodInfo target = typeof(ConvStub).GetMethod("TryConvert");
             MethodInfo postfix = typeof(ConvPatches).GetMethod("Postfix", BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null) { Console.WriteLine("FAIL: __args probe scaffolding missing"); return 1; }
+            if (target == null || postfix == null) { Console.WriteLine("FAIL: convert probe scaffolding missing"); return 1; }
             try
             {
                 harmony.Patch(target, null, new HarmonyMethod(postfix));
-                Console.WriteLine("installed: __args postfix on TryConvert(byte[], int, int, delegate, out byte[], out int, object, int)");
+                Console.WriteLine("installed: by-name postfix on TryConvert(byte[], int, int, delegate, out byte[], out int, object, int)");
             }
             catch (Exception e)
             {
-                Console.WriteLine("FAIL: cannot install the __args postfix: " + e.Message);
+                Console.WriteLine("FAIL: cannot install the by-name postfix: " + e.Message);
                 return 1;
             }
 
-            ConvPatches.Calls = 0; ConvPatches.Args = null; ConvPatches.Result = false;
+            ConvPatches.Calls = 0; ConvPatches.SeenConverted = null; ConvPatches.SeenUsed = -1;
+            ConvPatches.SeenBudget = -1; ConvPatches.SeenDim = -1; ConvPatches.SeenLength = -1;
             bool ok;
-            byte[] directConverted;
-            int directUsed;
-            try { ok = ConvStub.TryConvert(new byte[] { 1, 2, 3, 4 }, 4, 2048, null, out directConverted, out directUsed); }
+            byte[] callerConverted;
+            int callerUsed;
+            try { ok = ConvStub.TryConvert(new byte[] { 1, 2, 3, 4 }, 4, 2048, null, out callerConverted, out callerUsed); }
             catch (Exception e)
             {
                 Console.WriteLine("FAIL: the patched call threw " + e.GetType().Name + ": " + e.Message);
                 return 1;
             }
 
-            object[] a = ConvPatches.Args;
-            if (ConvPatches.Calls != 1 || a == null) { Console.WriteLine("FAIL: postfix not called"); return 1; }
-            if (a.Length != 8) { Console.WriteLine("FAIL: __args has " + a.Length + " entries (8 expected)"); fail++; }
+            if (ConvPatches.Calls != 1) { Console.WriteLine("FAIL: postfix not called"); return 1; }
             if (!ok || !ConvPatches.Result) { Console.WriteLine("FAIL: __result not visible"); fail++; }
-            byte[] converted = a.Length > 4 ? a[4] as byte[] : null;
-            int used = a.Length > 5 ? Convert.ToInt32(a[5]) : -1;
-            int budget = a.Length > 2 ? Convert.ToInt32(a[2]) : -1;
-            int dim = a.Length > 7 ? Convert.ToInt32(a[7]) : -1;
-            if (converted == null || converted.Length != 4) { Console.WriteLine("FAIL: out byte[] not visible through __args"); fail++; }
-            if (used != 4) { Console.WriteLine("FAIL: out int used=" + used + " (4 expected)"); fail++; }
-            if (directUsed != 4 || directConverted == null) { Console.WriteLine("FAIL: the unpatched call returned used=" + directUsed); fail++; }
-            if (budget != 2048) { Console.WriteLine("FAIL: budget=" + budget + " (2048 expected)"); fail++; }
-            if (dim != 8192) { Console.WriteLine("FAIL: maxDimension=" + dim + " (8192 expected)"); fail++; }
-            if (fail == 0) Console.WriteLine("verified: __args postfix sees in args and both out values (used=" + used + ")");
+            if (callerConverted == null || callerConverted.Length != 4) { Console.WriteLine("FAIL: the caller lost the decoded buffer"); fail++; }
+            if (callerUsed != 4) { Console.WriteLine("FAIL: the caller got used=" + callerUsed + " (4 expected)"); fail++; }
+            if (ConvPatches.SeenConverted == null || ConvPatches.SeenUsed != 4)
+                { Console.WriteLine("FAIL: the postfix did not see the out values (used=" + ConvPatches.SeenUsed + ")"); fail++; }
+            if (ConvPatches.SeenBudget != 2048) { Console.WriteLine("FAIL: budget=" + ConvPatches.SeenBudget + " (2048 expected)"); fail++; }
+            if (ConvPatches.SeenDim != 8192) { Console.WriteLine("FAIL: maxDimension=" + ConvPatches.SeenDim + " (8192 expected)"); fail++; }
+            if (ConvPatches.SeenLength != 4) { Console.WriteLine("FAIL: length=" + ConvPatches.SeenLength + " (4 expected)"); fail++; }
+            if (fail == 0) Console.WriteLine("verified: by-name postfix reads both out values and the caller keeps them (used=" + callerUsed + ")");
 
-            Console.WriteLine(fail == 0 ? "ARGS PROBE OK" : "ARGS PROBE FAILED (" + fail + ")");
+            // Informational only: the same shape with __args, on the second copy of the method.
+            try
+            {
+                Harmony h2 = new Harmony("probe.sleepsheep.agenttouchfix.argspostfix");
+                MethodInfo t2 = typeof(ArgsStub).GetMethod("TryConvert");
+                MethodInfo p2 = typeof(ArgsPatches).GetMethod("Postfix", BindingFlags.Static | BindingFlags.NonPublic);
+                h2.Patch(t2, null, new HarmonyMethod(p2));
+                byte[] c2;
+                int u2;
+                ArgsStub.TryConvert(new byte[] { 1, 2, 3, 4 }, 4, 2048, null, out c2, out u2);
+                Console.WriteLine("info: __args postfix on out parameters -> caller sees converted="
+                    + (c2 == null ? "null" : c2.Length + " bytes") + " used=" + u2
+                    + " (Harmony copies __args back; do not use __args on out parameters)");
+            }
+            catch (Exception e) { Console.WriteLine("info: __args variant could not be exercised: " + e.Message); }
+
+            Console.WriteLine(fail == 0 ? "CONVERT PROBE OK" : "CONVERT PROBE FAILED (" + fail + ")");
             return fail;
         }
 

@@ -106,29 +106,27 @@ namespace AgentTouchFix
         }
 
         /// <summary>
-        /// TryConvert(input, length, budget, decoder, out converted, out used, pool, maxDimension):
-        /// __args carries the out values after the call, which is all this needs.
+        /// TryConvert(input, length, budget, decoder, out converted, out used, pool, maxDimension).
+        ///
+        /// Parameters are bound BY NAME and the two out values are declared 'ref' only so that
+        /// Harmony hands over the post-call values. They are never assigned, so the write-back
+        /// Harmony performs for a ref parameter puts the same reference / the same number back.
+        ///
+        /// NOT object[] __args: tests/HarmonyProbe shows that Harmony builds __args *before* the
+        /// call and copies it back over the arguments afterwards, so a postfix that does not
+        /// rewrite __args hands the caller the pre-call values - converted = null, used = 0, i.e.
+        /// the texture would silently lose its decoded buffer. Never use __args on a method with
+        /// out parameters.
         /// </summary>
-        internal static void TryConvert_Postfix(object[] __args, bool __result)
+        internal static void TryConvert_Postfix(bool __result, byte[] input, int length, int budget,
+            ref byte[] converted, ref int used, int maxDimension)
         {
             try
             {
                 Interlocked.Increment(ref _convCalls);
 
-                byte[] input = null;
-                byte[] converted = null;
-                int length = 0, budget = 0, limit = 0, used = 0;
-                if (__args != null && __args.Length >= 8)
-                {
-                    input = __args[0] as byte[];
-                    length = Atoi(__args[1]);
-                    budget = Atoi(__args[2]);
-                    converted = __args[4] as byte[];
-                    used = Atoi(__args[5]);
-                    limit = Atoi(__args[7]);
-                }
                 if (budget > 0) _budget = budget;
-                if (limit > 0) _limit = limit;
+                if (maxDimension > 0) _limit = maxDimension;
 
                 int inFmt, inW, inH, inMips;
                 Header(input, length, out inFmt, out inW, out inH, out inMips);

@@ -931,7 +931,7 @@ method is patched** (the v9 rule and its CI guard are unchanged).
 |---|---|---|
 | `Ports1de.DdsFallback.TryPlan` | prefix (`int budget, int maxDimension`) | requested budget + dimension cap |
 | `Ports1de.DdsFallback.TryPlan` | postfix (`bool __result, object plan`) | plan `Format/Width/Height/Shift/SourceMip` |
-| `Ports1de.DdsFallback.TryConvert` | postfix (`object[] __args, bool __result`) | success, `used` bytes, in/out header |
+| `Ports1de.DdsFallback.TryConvert` | postfix (`bool __result, byte[] input, int length, int budget, ref byte[] converted, ref int used, int maxDimension`) | success, `used` bytes, in/out header |
 | `Waylith.Rendering.Texture2D.Evict` | parameterless prefix | evictions |
 | `Waylith.Rendering.GpuTextureService.GetOrCreateFallbackTexture` | parameterless prefix | 1×1 stand-in handed out |
 | `Waylith.Rendering.TextureResidency.Offload` | parameterless prefix | offload passes |
@@ -940,6 +940,13 @@ method is patched** (the v9 rule and its CI guard are unchanged).
 `object plan` is how the out parameter is read without naming `Ports1de.DdsFallback.Plan` (internal
 to `RwHost.dll`); if that shape is ever rejected the postfix is skipped with a `WARN` and the mip
 shift is derived from the input vs. converted pixel width instead, so the summary keeps working.
+
+**`object[] __args` is never used on `TryConvert`.** The first CI probe proved why: Harmony builds
+`__args` *before* the call and copies it back over the arguments *after* the patch, so a postfix that
+does not rewrite `__args` hands the caller the pre-call values — `converted = null`, `used = 0`, i.e.
+the decoded buffer disappears. The postfix therefore binds by parameter name, and declares the two
+`out` values `ref` (never assigning them) so Harmony hands over — and writes back — the real
+post-call values.
 
 Every 30 s (`System.Threading.Timer`, root-held static field) one line into
 `files/game/agenttouchfix.log` — file only, never `Verse.Log`:
@@ -960,6 +967,6 @@ records what could be installed.
 | probe | proves |
 |---|---|
 | span/plan | a prefix+postfix can be installed on a `ReadOnlySpan<byte>` method; named `int` parameters bind; `object` receives an `out` reference-type parameter; `__result` is visible |
-| args | a postfix may read every argument, including two `out` values, through `object[] __args` |
+| convert | a by-name postfix sees both `out` values *and* leaves them intact for the caller; it also prints what the `__args` variant does to them (caller sees `null` / `0`), so the rule above is reproducible |
 | pick | a generic prefix closed over the position struct can replace `List<object>` and skip the original, and reads the boxed position correctly |
 | evict | a parameterless prefix on an instance method counts without disturbing the body |
