@@ -417,3 +417,148 @@ normal on `true`) is exercised in CI by `tests/HarmonyProbe` (`OVERLOAD PROBE OK
 * artifact staged at `~/.hermes/cache/scratch/agenttouchfix/v6/AgentTouchFix-v6.zip`
   (zip md5 `37dac204647d006cc19eb1e1cb0b9272`, 22,264 B), unzipped next to it in `v6/AgentTouchFix/`.
 * **not deployed** — v5 is still what runs on the device.
+
+## 9. v7-txtsel build (version 1.5.0) — one texture trim, building select-all, IME text
+
+Three independent reports, three independent patches. **Nothing from v6 was removed or relaxed**:
+tap snapping (`always`/`auto`/`off`), tooltip suppression, the debug-tool path, the pointer/gesture
+fixes and the file-only logging contract are byte-for-byte the same code paths.
+
+| # | report | patch target (this build) | file |
+|---|---|---|---|
+| A | textures blink / turn grey after a memory pressure event | `RwHost.AndroidMemoryAndGcGovernor.GameBoundary` (private static, 0 params), `.RenderBoundary` (internal static, 0 params) | `GovernorPatches.cs` (new) |
+| B | double tapping a wall / workbench does not select all of them | `PortUI.MobileSelectionController.Tap` (public static, 3 params) — the already-installed prefix, extended | `DoubleTapSelect.cs` (new), `ToolPatches.cs`, `SnapGeometry.cs` |
+| C | typed text is dropped, Chinese input looks broken | `Ports1de.TextEditMailbox.TryTake` (internal, 3 params: `TextEditTarget`, `long`, `out string`) | `TextInputPatches.cs` (new) |
+
+### 9.1 A — a single pressure event was answered twice
+
+```
+GameBoundary()      [game thread, per frame via AppContext "Ports1de.MemoryPressureAtFrame"]
+    if (pending == 0) return;
+    ...
+    release?.Invoke();                       // 1st: ReleaseBuffers() on every decoded staging buffer
+    Volatile.Write(ref renderTrim, 1);
+RenderBoundary()    [render thread, VulkanLifecycleAndSwapchainGuard.BeforeFrame]
+    if (Interlocked.Exchange(ref renderTrim, 0) != 0) release?.Invoke();   // 2nd
+```
+
+The first release is at the game boundary, before the render thread consumes this frame's texture
+uploads. The second one fires on the *next* render frame — the frame that consumes exactly those
+queued uploads — so buffers that were decoded but not yet uploaded are evicted, the upload is lost,
+and the texture shows as a grey block / flickers until it is decoded again.
+
+Fix, both prefixes:
+
+* `GameBoundary_Prefix` — records `Environment.TickCount64` **only when `pending != 0`**. That
+  condition is the whole point: `GameBoundary` runs every frame and returns immediately when nothing
+  is pending, so an unconditional timestamp would suppress the render trim forever (renders are
+  16 ms apart, the window is 500 ms).
+* `RenderBoundary_Prefix` — if `renderTrim == 1` **and** a recorded release is less than 500 ms old,
+  `return false` (skip). `renderTrim` is *not* touched, so that trim is deferred to the first render
+  frame more than 500 ms later, not lost. When `renderTrim == 0` the original is a no-op and is left
+  alone; a `RenderBoundary` with no recent `GameBoundary` (pause, surface recreate, device loss)
+  always runs.
+
+Log (file only, rate limited to 1/s):
+`render trim skipped: 16 ms after the game boundary already released the textures (renderTrim left set, retried after 500 ms) skips=N`
+
+Risk: a real trim can now be delayed by up to 500 ms (memory pressure is answered half a second
+later instead of immediately twice). That is the intended trade — the pixels are what was broken.
+
+### 9.2 B — the double-tap branch tested the wrong category
+
+`PortUI.MobileSelectionController.Tap` has:
+
+```csharp
+if (same != null && same == lastTappedThing && Time.unscaledTime - lastTap < 0.4f
+    && same.def.category == ThingCategory.Item && !same.def.neverMultiSelect)
+```
+
+`ThingCategory` in this build is `None=0, Pawn=1, Item=2, Building=3`, so `== Item` can never be
+true for a building. Vanilla `RimWorld.Selector.SelectAllMatchingObjectUnderMouseOnScreen()` has no
+category restriction at all (desktop double click).
+
+`ToolPatches.Tap_Prefix` (no dev tool armed) now calls `DoubleTapSelect.TryConsume`:
+
+1. PortUI's own candidate picker (`MobileSelectionController.Candidates`, shared with the snapping
+   code) resolves the thing under the tap — a tap a few pixels off the wall still counts, and the
+   thing, not the pixel cell, is the identity key (the port fires its `DoubleTap` signal for two ups
+   < 300 ms and < 40 dp apart, which at high zoom spans several cells);
+2. it is taken over only when it is the same `Thing` as the previous tap, the gap is < 400 ms,
+   `def.category == Building` and `!def.neverMultiSelect` (the last two are exactly the vanilla
+   preconditions);
+3. `ToolPatches.PushCellPin(thing.Position, thing.DrawPos)` pins `UI.MouseCell()` /
+   `UI.MouseMapPosition()` (the nested-safe version of the pin the tool path already uses), the
+   vanilla `SelectAllMatchingObjectUnderMouseOnScreen()` is invoked, `PopCellPin()` restores;
+4. `return false` from the prefix, so the rest of `Tap` is skipped. The selection is **not** cleared
+   first — the vanilla call only adds the matching things.
+
+Log: `dbl-tap building select-all -> Wall at (12,0,34) (selected 1 -> 7)`.
+
+If `SelectAllMatchingObjectUnderMouseOnScreen` cannot be resolved, one WARN is written and the tap
+falls through to the unmodified single select (behaviour unchanged, not broken).
+
+Note: `MobileTouchInput` passes `Tap(pos, kind == Context, kind != Context)`, so `selectOnly` is
+**true for every ordinary tap**. It is therefore not used as a filter; only a long press is excluded.
+
+### 9.3 C — the IME answer was thrown away when the field moved
+
+```csharp
+public bool TryTake(TextEditTarget field, long now, out string text)   // lock (gate)
+    if (hasPending && now > expires) hasPending = false;
+    if (!hasPending || field != target) return false;                  // <-- whole struct compare
+    hasPending = false; text = pending; pending = null; return true;
+```
+
+`TextEditTarget` is `record struct (int Window, int Control, float X, float Y, float Width, float
+Height)` and `NativeTextBridge.Target(rect)` rebuilds it every frame from
+`GUIUtility.GUIToScreenPoint(rect.position)`, `rect.width/height`, `GUIUtility.keyboardControl` and
+`Find.WindowStack.currentlyDrawnWindow.ID`. Any layout change between opening the editor and the IME
+answering — scrolled window, re-laid-out dialog, the soft keyboard resizing the screen — changes
+X/Y/Control, the equality fails and the text is dropped (it is only cleared on a 10 s expiry). An
+IME commit for Chinese always takes long enough to hit this.
+
+`TryTake_Postfix` (`ref string text`, `ref bool __result`, `object[] __args`, `object __instance`)
+runs only when the exact match already failed, takes the mailbox's own `gate` lock, and then:
+
+* `hasPending` must be true and `now <= expires` (a genuinely waiting answer),
+* `pending.Target.Window == field.Window` (both read by reflection, `int.MinValue` when missing),
+* when the window id is `-1` (no window drawn, where "same window" proves nothing) the control id
+  must match as well; otherwise the control id may differ — it is only reported.
+
+On a hit: `text`, `__args[2]`, `__result = true`, and `hasPending`/`pending` cleared, so the answer
+is delivered exactly once. Log per hit (the diff is what makes a wrong delivery visible):
+
+```
+ime text recovered: window 4021 control 99043 -> 99043 (same) rect (312.5,844.0,880.0,96.0) -> (312.5,712.0,880.0,96.0) chars=3 relaxed=1
+```
+
+Risk: if two text fields in the same window are pumped in the same frame, the pending text goes to
+the first one pumped. It is one answer, delivered once, in the window it was typed in — the failure
+mode this replaces is "the text is lost".
+
+### 9.4 Verification and build
+
+* metadata check against the shipped `dlls/` references (`dnfile`): `RwHost.AndroidMemoryAndGcGovernor`
+  has `GameBoundary` (0 params) and `RenderBoundary` (0 params); `Ports1de.TextEditMailbox.TryTake`
+  has 3; `RimWorld.Selector.SelectAllMatchingObjectUnderMouseOnScreen` has 0;
+  `PortUI.MobileSelectionController.Tap` has 3.
+* the produced DLL contains `TryTake_Postfix(__instance, __args, text, __result)`,
+  `GameBoundary_Prefix()`, `RenderBoundary_Prefix()`, `TryConsume`, `FirstCandidate`, `PushCellPin`,
+  `PopCellPin`, and the literals `dbl-tap building select-all`, `ime text recovered`,
+  `render trim skipped`, `BUILD v7-txtsel`.
+* assembly references of the DLL are still exactly `0Harmony`, `Assembly-CSharp`, `System.Runtime` —
+  the CI guard passes, i.e. no `PortUI` / `RwHost` / `UnityEngine` / `Mono.Android` reference was
+  introduced by reading all of this through reflection.
+* CI run **43460212057** (mod commit `daf6273`) and **43461618422** (About.xml commit `e650034`),
+  `dotnet build -c Release`: **0 errors**; two runs produced a byte-identical DLL
+  (`374c5baf…`), so the docs commit did not change the binary.
+* `Assemblies/AgentTouchFix.dll` **55,808 bytes**, md5 `374c5baf33be538c51e4b8cb4a23ba3b`
+  (sha256 `3ec03355388d18b5caf5eb344115b645179ea2b3843327ccce54f8f8d58a9e87`); v6 was 48,128 B.
+* artifact: `AgentTouchFix.zip` **26,117 bytes**, md5 `56bb7e652c179c94050abefaa01c3e96`, staged at
+  `~/.hermes/cache/scratch/agenttouchfix/v7/AgentTouchFix.zip`, unzipped next to it in
+  `v7/AgentTouchFix/`.
+* **not deployed and not run in the game** (as instructed): the three fixes are compile-verified and
+  metadata-verified, not play-tested. The first gameplay check should be the three reports that
+  motivated them — a pressure event (or the log line above), a double tap on a wall, and a
+  Chinese IME commit into a text field.
