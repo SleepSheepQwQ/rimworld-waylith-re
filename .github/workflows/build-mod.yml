@@ -58,5 +58,23 @@ jobs:
           path: dist/AgentTouchFix.zip
           if-no-files-found: error
 
+      - name: Verify no third-party assembly references
+        run: |
+          set -euo pipefail
+          DLL=dist/AgentTouchFix/Assemblies/AgentTouchFix.dll
+          echo "assembly refs (metadata strings):"
+          strings -a "$DLL" | grep -E '^(0Harmony|Assembly-CSharp|System\.Runtime|System\.Private\.CoreLib)$' | sort -u
+          for bad in PortUI RwHost Mono.Android UnityEngine Waylith Microsoft.Maui; do
+            if strings -a "$DLL" | grep -qx "$bad"; then
+              echo "ERROR: mod DLL carries an assembly reference to $bad"; exit 1
+            fi
+          done
+          # UTF-16 literals: the engine must be pinned to the RwHost copy at runtime
+          strings -el "$DLL" | grep -q 'TouchGestureEngine pinned via TouchControls.engine' \
+            || { echo "ERROR: engine pin marker missing from the DLL"; exit 1; }
+          strings -el "$DLL" | grep -q 'Ports1de.TouchGestureEngine' \
+            || { echo "ERROR: engine patch target literal missing"; exit 1; }
+          echo "reference check OK"
+
       - name: Report dll size
         run: stat -c '%n %s bytes' dist/AgentTouchFix/Assemblies/AgentTouchFix.dll

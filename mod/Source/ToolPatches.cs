@@ -19,7 +19,7 @@ namespace AgentTouchFix
         private static FieldInfo _fCurTool;          // LudeonTK.DebugTools.curTool
         private static FieldInfo _fClickAction;      // LudeonTK.DebugTool.clickAction
         private static FieldInfo _fDragBox;          // RimWorld.Selector.dragBox
-        private static FieldInfo _fDragBoxActive;    // Verse.DragBox.active
+        private static FieldInfo _fDragBoxActive;    // RimWorld.DragBox.active (public bool field)
 
         private static bool _timeResolved;
         private static PropertyInfo _pFrameCount;    // UnityEngine.Time.frameCount
@@ -57,15 +57,34 @@ namespace AgentTouchFix
             catch (Exception e) { Refl.Err("failed to clear curTool: " + e.Message); }
         }
 
+        /// <summary>
+        /// clickAction is a public field (Action) in 1.7, but never assume: fall back to a
+        /// same-named readable property if the field lookup failed.
+        /// </summary>
         private static Delegate ClickActionOf(object tool)
         {
             if (tool == null) return null;
-            if (_fClickAction == null || _fClickAction.DeclaringType != tool.GetType())
+            Type t = tool.GetType();
+            if (_fClickAction == null || _fClickAction.DeclaringType != t)
             {
-                _fClickAction = Refl.F(tool.GetType(), "clickAction");
+                _fClickAction = Refl.F(t, "clickAction");
             }
-            try { return _fClickAction == null ? null : _fClickAction.GetValue(tool) as Delegate; }
-            catch { return null; }
+            if (_fClickAction != null)
+            {
+                try
+                {
+                    Delegate d = _fClickAction.GetValue(tool) as Delegate;
+                    if (d != null) return d;
+                }
+                catch { }
+            }
+            try
+            {
+                PropertyInfo p = Refl.Prop(t, "clickAction");
+                if (p != null && p.CanRead) return p.GetValue(tool, null) as Delegate;
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>Monotonic "frame" clock: Unity frameCount when present, else 16 ms buckets.</summary>

@@ -25,6 +25,35 @@ namespace AgentTouchFix
             try { Log.Error(P + m); } catch { }
         }
 
+        /// <summary>
+        /// Resolve a type inside one specific assembly. RwHost.dll and PortUI.dll both contain a
+        /// compiled copy of Ports1de.TouchGestureEngine (PortUI's copy has no callers), so name
+        /// based lookup alone is ambiguous - always prefer the assembly that actually runs.
+        /// </summary>
+        internal static Type TIn(string asmName, string typeName)
+        {
+            try
+            {
+                Assembly a = Assembly.Load(asmName);
+                if (a == null) return null;
+                return a.GetType(typeName, false);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Assembly-qualified lookup first, then the ambiguity-prone global search.</summary>
+        internal static Type TPrefer(string asmName, string typeName)
+        {
+            Type t = TIn(asmName, typeName);
+            if (t != null) return t;
+            t = T(typeName);
+            if (t != null)
+            {
+                Warn("type not found in " + asmName + ", fell back to " + t.Assembly.GetName().Name + " for " + typeName);
+            }
+            return t;
+        }
+
         /// <summary>Resolve a type by full name, across all loaded assemblies (falls back to Assembly.Load).</summary>
         internal static Type T(string name)
         {
@@ -124,25 +153,28 @@ namespace AgentTouchFix
             int ok = 0, skipped = 0, failed = 0;
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
-            Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.T("RimWorld.Selector"), "HandleMapClicks"),
+            Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
                 MI(typeof(ToolPatches), "HandleMapClicks_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
-            Add("PortUI.MobileSelectionController.Tap", () => Refl.M(Refl.T("PortUI.MobileSelectionController"), "Tap"),
+            Add("PortUI.MobileSelectionController.Tap", () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Tap"),
                 MI(typeof(ToolPatches), "Tap_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
-            Add("Verse.UI.MouseCell", () => Refl.M(Refl.T("Verse.UI"), "MouseCell"),
+            Add("Verse.UI.MouseCell", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseCell"),
                 MI(typeof(ToolPatches), "MouseCell_Prefix"), null, 700, ref ok, ref skipped, ref failed);
 
-            Add("PortUI.QuickOrderWheel.Open", () => Refl.M(Refl.T("PortUI.QuickOrderWheel"), "Open"),
+            Add("PortUI.QuickOrderWheel.Open", () => Refl.M(Refl.TPrefer("PortUI", "PortUI.QuickOrderWheel"), "Open"),
                 MI(typeof(ToolPatches), "QuickOrderWheel_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
-            Add("LudeonTK.DebugTool.DebugToolOnGUI", () => Refl.M(Refl.T("LudeonTK.DebugTool"), "DebugToolOnGUI"),
+            Add("LudeonTK.DebugTool.DebugToolOnGUI", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "LudeonTK.DebugTool"), "DebugToolOnGUI"),
                 MI(typeof(ToolPatches), "DebugToolOnGUI_Prefix"), null, -1, ref ok, ref skipped, ref failed);
 
-            Add("Ports1de.TouchGestureEngine.SecondUp", () => Refl.M(Refl.T("Ports1de.TouchGestureEngine"), "SecondUp"),
+            // NOTE: Ports1de.TouchGestureEngine exists in BOTH RwHost.dll and PortUI.dll
+            // (same source compiled twice, PortUI's copy unused). PointerPatches.EngineType()
+            // pins the RwHost copy - the one TouchControls actually drives.
+            Add("Ports1de.TouchGestureEngine.SecondUp", () => Refl.M(PointerPatches.EngineType(), "SecondUp"),
                 null, MI(typeof(PointerPatches), "SecondUp_Postfix"), -1, ref ok, ref skipped, ref failed);
 
-            Add("RwHost.TouchControls.OnTouch", () => Refl.M(Refl.T("RwHost.TouchControls"), "OnTouch"),
+            Add("RwHost.TouchControls.OnTouch", () => Refl.M(PointerPatches.ControlsType(), "OnTouch"),
                 MI(typeof(PointerPatches), "OnTouch_Prefix"), MI(typeof(PointerPatches), "OnTouch_Postfix"),
                 -1, ref ok, ref skipped, ref failed);
 
@@ -182,7 +214,8 @@ namespace AgentTouchFix
                 H.Patch(original,
                     prefix == null ? null : Refl.At(prefix, priority),
                     postfix == null ? null : Refl.At(postfix, priority));
-                Refl.Info("patched " + label + " (" + original.DeclaringType.FullName + "." + original.Name + ")");
+                Refl.Info("patched " + label + " -> " + original.DeclaringType.Assembly.GetName().Name + "!"
+                    + original.DeclaringType.FullName + "." + original.Name);
                 ok++;
             }
             catch (Exception e)

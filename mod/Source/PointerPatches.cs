@@ -27,15 +27,70 @@ namespace AgentTouchFix
         private static FieldInfo _fEngineField;   // TouchControls.engine
         private static MethodInfo _mDown, _mSecondDown, _mCameraClear;
         private static bool _resolved;
+        private static Type _enginePinned;
+        private static bool _enginePinnedDone;
+
+        /// <summary>
+        /// Ports1de.TouchGestureEngine is compiled into BOTH RwHost.dll and PortUI.dll (the PortUI
+        /// copy has no callers). A name-only lookup can land on the dead copy and every SecondUp
+        /// patch would silently do nothing, so pin the instance type that RwHost.TouchControls
+        /// actually holds, then the RwHost assembly, and only then fall back to a global search.
+        /// </summary>
+        private static Type PinEngine()
+        {
+            if (_enginePinnedDone) return _enginePinned;
+            _enginePinnedDone = true;
+
+            Type controls = Refl.TPrefer("RwHost", "RwHost.TouchControls");
+            if (controls != null)
+            {
+                FieldInfo f = Refl.F(controls, "engine");
+                if (f != null && f.FieldType != null && f.FieldType.FullName == "Ports1de.TouchGestureEngine")
+                {
+                    _enginePinned = f.FieldType;
+                    Refl.Info("TouchGestureEngine pinned via TouchControls.engine -> assembly " + f.FieldType.Assembly.GetName().Name);
+                    return _enginePinned;
+                }
+            }
+
+            Type t = Refl.TIn("RwHost", "Ports1de.TouchGestureEngine");
+            if (t != null)
+            {
+                Refl.Info("TouchGestureEngine resolved in assembly RwHost");
+            }
+            else
+            {
+                t = Refl.T("Ports1de.TouchGestureEngine");
+                if (t != null)
+                {
+                    Refl.Warn("TouchGestureEngine resolved via fallback in assembly " + t.Assembly.GetName().Name
+                        + " (expected RwHost) - the SecondUp patch may not hit the live engine");
+                }
+            }
+            _enginePinned = t;
+            return t;
+        }
+
+        internal static Type EngineType()
+        {
+            Resolve();
+            return _tEngine;
+        }
+
+        internal static Type ControlsType()
+        {
+            Resolve();
+            return _tControls;
+        }
 
         private static void Resolve()
         {
             if (_resolved) return;
             _resolved = true;
 
-            _tEngine = Refl.T("Ports1de.TouchGestureEngine");
-            _tControls = Refl.T("RwHost.TouchControls");
-            _tCamera = Refl.T("RwHost.TouchCamera");
+            _tEngine = PinEngine();
+            _tControls = Refl.TPrefer("RwHost", "RwHost.TouchControls");
+            _tCamera = Refl.TPrefer("RwHost", "RwHost.TouchCamera");
 
             if (_tEngine == null) { Refl.Warn("Ports1de.TouchGestureEngine not found - pointer fixes limited"); return; }
 
