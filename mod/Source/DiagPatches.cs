@@ -26,6 +26,11 @@ namespace AgentTouchFix
     /// </summary>
     internal static class Diag
     {
+        // v5: every prefix below starts with 'if (!Refl.DiagOn) return;'. With the flag file absent
+        // the diagnostics cost one boolean read - no string building, no file IO, no Verse.Log.
+        // Install() additionally refuses to patch at all in that case, so the per-event Harmony
+        // call does not even happen.
+
         // ---------------------------------------------------------------- rate limits
         // v4: every channel is capped at 2 lines per wall clock second (v3 allowed 5 per second on
         // Add / tcam.Add and 10 per second on MOVE events, which flooded the log).
@@ -180,6 +185,7 @@ namespace AgentTouchFix
         /// <summary>RwHost.GameCamera.Add(float dx, float dy, float zoom) - the camera accumulator.</summary>
         internal static void Add_Prefix(object[] __args)
         {
+            if (!Refl.DiagOn) return;
             try
             {
                 if (__args == null || __args.Length < 3) return;
@@ -201,6 +207,7 @@ namespace AgentTouchFix
         /// <summary>RwHost.TouchCamera.Add - the forwarding entry every gesture branch calls.</summary>
         internal static void TcamAdd_Prefix(object[] __args)
         {
+            if (!Refl.DiagOn) return;
             try
             {
                 if (__args == null || __args.Length < 3) return;
@@ -222,6 +229,7 @@ namespace AgentTouchFix
         /// <summary>RwHost.ClassicTouchControls.OnTouch(MotionEvent) - the live chain here.</summary>
         internal static void ClassicOnTouch_Prefix(object __instance, object[] __args)
         {
+            if (!Refl.DiagOn) return;
             try
             {
                 if (__args == null || __args.Length == 0) return;
@@ -262,6 +270,7 @@ namespace AgentTouchFix
         /// <summary>RwHost.TouchControls.OnTouch(MotionEvent) - entry point, classic flag + engine state.</summary>
         internal static void ModernOnTouch_Prefix(object __instance, object[] __args)
         {
+            if (!Refl.DiagOn) return;
             try
             {
                 if (__args == null || __args.Length == 0) return;
@@ -336,6 +345,14 @@ namespace AgentTouchFix
         {
             int ok = 0, skipped = 0, failed = 0;
 
+            // v5: opt-in. Without the flag file nothing is patched, so a disabled diagnostics build
+            // costs exactly zero per-event work (no Harmony hop, no reflection, no allocation).
+            if (!Refl.DiagOn)
+            {
+                Refl.Info("diag: disabled (no " + Refl.DiagFlagPath + ") - no diagnostic patches installed");
+                return;
+            }
+
             // priority 800 (above Normal/High) so the read happens before PointerPatches resets anything
             Patch("RwHost.GameCamera.Add",
                 () => Refl.M(Refl.TPrefer("RwHost", "RwHost.GameCamera"), "Add"),
@@ -355,9 +372,8 @@ namespace AgentTouchFix
 
             LogTouchOptions();
 
-            string summary = "diag v3 summary: ok=" + ok + " skipped=" + skipped + " failed=" + failed;
-            if (failed > 0) Refl.Err(summary);
-            else if (skipped > 0) Refl.Warn(summary);
+            string summary = "diag summary: ok=" + ok + " skipped=" + skipped + " failed=" + failed;
+            if (failed > 0) Refl.ErrOnce(summary);
             else Refl.Info(summary);
         }
 

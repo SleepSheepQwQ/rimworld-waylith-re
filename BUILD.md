@@ -280,3 +280,41 @@ at runtime the mod logs one warning and `MouseCell` pinning keeps working as bef
 Snapping is intentionally forgiving, which means an empty-cell tool (terrain, spawn, dig
 designators) tapped next to a wall or item will be snapped onto that thing. The `tool snap ->` line
 names the target every time, so read the log before blaming the tool.
+
+## 7. v5-quiet build (version 1.3.0) — no more log dialog
+
+The functional patches are byte-for-byte the v4 ones; only the logging changed.
+
+### 7.1 What was wrong
+
+`Refl.Info/Warn/Err` called `Verse.Log.Message/Warning/Error` on every line. RimWorld opens its
+"there were errors / warnings" window for the latter two, so a single skipped patch target or one
+reflection hiccup on a tap produced a dialog box, and the v3/v4 diagnostics added ~2 lines/s on
+top of it.
+
+### 7.2 New logging contract
+
+| call | file `files/game/agenttouchfix.log` | in-game console | dialog |
+| --- | --- | --- | --- |
+| `Refl.Info` | always | only when the diag flag exists | never |
+| `Refl.Warn` | always | never | never |
+| `Refl.Err` (runtime failures: taps, gestures) | always | never | never |
+| `Refl.ErrOnce` (patch failed to apply at startup) | always | once per process | at most one, ever |
+
+* Default is silent: no `Verse.Log` call at all.
+* The log file is truncated at startup when it exceeds 512 KB (one check per process, not per line).
+
+### 7.3 Diagnostics switch
+
+```
+files/game/agenttouchfix.diag      # create an empty file, restart the game
+```
+
+* Present → the four diagnostic prefixes (`GameCamera.Add`, `TouchCamera.Add`,
+  `ClassicTouchControls.OnTouch`, `TouchControls.OnTouch`) are installed as in v3/v4 and every INFO
+  line is mirrored to the console via `Log.Message` (`Warning`/`Error` are never mirrored, so no
+  dialog can appear).
+* Absent → `Diag.Install()` returns without patching anything, and each prefix also starts with
+  `if (!Refl.DiagOn) return;`, so a disabled build costs zero per-event work: no Harmony hop, no
+  string building, no reflection, no file write.
+* Read once, in `Bootstrap`, before the first patch is applied — toggling needs a restart.

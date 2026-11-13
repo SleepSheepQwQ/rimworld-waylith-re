@@ -11,29 +11,93 @@ namespace AgentTouchFix
     {
         internal const string P = "[AgentTouchFix] ";
 
-        private const string LogPath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.log";
+        // v5: the mod is silent by default. Everything goes to this file only - Verse.Log.Warning /
+        // Verse.Log.Error open the in-game "there were errors" dialog, and Log.Message spams the
+        // console, so neither is called unless the user opts in (see DiagOn below).
+        internal const string LogPath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.log";
+        internal const string DiagFlagPath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.diag";
+
+        // 0 = off, 1 = on, -1 = not read yet (read exactly once, from Bootstrap).
+        private static int _diagState = -1;
+        private static bool _sessionFileChecked;
+        private static bool _errLogged;
+
+        /// <summary>
+        /// True when files/game/agenttouchfix.diag exists. Read once per process (Bootstrap calls
+        /// ReadDiagFlag); the lazy path here is only a safety net. When false the diagnostics do
+        /// nothing at all - no Verse.Log, not even a file line.
+        /// </summary>
+        internal static bool DiagOn
+        {
+            get
+            {
+                int s = _diagState;
+                if (s >= 0) return s == 1;
+                bool on = false;
+                try { on = File.Exists(DiagFlagPath); } catch { }
+                _diagState = on ? 1 : 0;
+                return on;
+            }
+        }
+
+        /// <summary>Called once from Bootstrap, before any patch is installed.</summary>
+        internal static void ReadDiagFlag()
+        {
+            bool on = false;
+            try { on = File.Exists(DiagFlagPath); } catch { }
+            _diagState = on ? 1 : 0;
+            Sink("INFO", "diagnostics " + (on ? "ON (" + DiagFlagPath + " exists): INFO lines also mirrored to Log.Message" : "OFF (create " + DiagFlagPath + " to enable): file only, no Verse.Log"));
+        }
 
         private static void Sink(string level, string m)
         {
-            try { File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss.fff") + " " + level + " " + m + "\n"); } catch { }
+            try
+            {
+                // Keep the file bounded: one truncation check per process, not per line.
+                if (!_sessionFileChecked)
+                {
+                    _sessionFileChecked = true;
+                    try
+                    {
+                        FileInfo fi = new FileInfo(LogPath);
+                        if (fi.Exists && fi.Length > 512 * 1024) fi.Delete();
+                    }
+                    catch { }
+                }
+                File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss.fff") + " " + level + " " + m + "\n");
+            }
+            catch { }
         }
 
+        /// <summary>File only. Console mirroring only when the diag flag is present.</summary>
         internal static void Info(string m)
         {
-            try { Log.Message(P + m); } catch { }
             Sink("INFO", m);
+            if (_diagState == 1) { try { Log.Message(P + m); } catch { } }
         }
 
+        /// <summary>File only - Verse.Log.Warning would pop the "warnings" dialog.</summary>
         internal static void Warn(string m)
         {
-            try { Log.Warning(P + m); } catch { }
             Sink("WARN", m);
         }
 
+        /// <summary>File only - used for every runtime (click / gesture) failure.</summary>
         internal static void Err(string m)
         {
-            try { Log.Error(P + m); } catch { }
             Sink("ERROR", m);
+        }
+
+        /// <summary>
+        /// Bootstrap-only: a genuine patch failure still gets exactly one Verse.Log.Error (so the
+        /// user knows the mod did not load) and every later call is file only.
+        /// </summary>
+        internal static void ErrOnce(string m)
+        {
+            Sink("ERROR", m);
+            if (_errLogged) return;
+            _errLogged = true;
+            try { Log.Error(P + m); } catch { }
         }
 
         /// <summary>
@@ -162,6 +226,10 @@ namespace AgentTouchFix
         static Bootstrap()
         {
             int ok = 0, skipped = 0, failed = 0;
+
+            // v5: decides silence vs. diagnostics exactly once, before anything can log.
+            Refl.ReadDiagFlag();
+
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
             Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
@@ -193,15 +261,17 @@ namespace AgentTouchFix
                 -1, ref ok, ref skipped, ref failed);
 
             string summary = "patch summary: ok=" + ok + " skipped=" + skipped + " failed=" + failed;
-            if (failed > 0) Refl.Err(summary);
-            else if (skipped > 0) Refl.Warn(summary);
+            // v5: silent by default. Only a real patch failure reaches the in-game dialog, and only
+            // once per process; everything else lives in agenttouchfix.log.
+            if (failed > 0) Refl.ErrOnce(summary);
             else Refl.Info(summary);
 
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
-            // these prefixes only append log lines. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v4-toolsnap (1.2.0) - tap snapping via PortUI.Candidates + MouseMapPosition pin, v3 diagnostics retained (2 lines/s)");
+            // these prefixes only append log lines, and they do nothing at all unless
+            // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
+            Refl.Info("BUILD v5-quiet (1.3.0) - file-only logging, diagnostics opt-in via agenttouchfix.diag; tap snapping via PortUI.Candidates + MouseMapPosition pin unchanged");
             try { Diag.Install(); }
-            catch (Exception e) { Refl.Err("diag install failed: " + e); }
+            catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
         }
 
         /// <summary>

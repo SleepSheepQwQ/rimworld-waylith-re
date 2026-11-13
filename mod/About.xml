@@ -3,7 +3,7 @@
   <name>AgentTouchFix</name>
   <author>SleepSheepQwQ</author>
   <packageId>sleepsheep.waylith.agenttouchfix</packageId>
-  <modVersion>1.2.0</modVersion>
+  <modVersion>1.3.0</modVersion>
   <supportedVersions>
     <li>1.7</li>
   </supportedVersions>
@@ -35,9 +35,19 @@
    - Stale GameCamera pan/zoom accumulators are cleared at gesture end, which removes the
      "leftover zoom applied on the next frame" effect.
 
-Everything is registered with AccessTools and fails soft: a missing target logs one red line
-([AgentTouchFix] ...) and the rest of the patches stay active. Nothing is patched permanently
-outside these eight methods.
+3) Silent by default (v5). Nothing is written to the in-game log window, so the game no longer
+   pops the "there were errors / warnings" dialog.
+   - Every line goes to files/game/agenttouchfix.log (last 512 KB per session kept).
+   - Optional diagnostics: create an empty file files/game/agenttouchfix.diag next to it and
+     restart. The touch/camera diagnostics are then re-enabled and INFO lines are additionally
+     mirrored to the in-game console (Log.Message only - never Warning/Error). Delete the file to
+     go quiet again. The flag is read once, at startup.
+   - Runtime failures (a tap or a gesture) are file-only; only a patch that fails to apply at
+     startup reports once, in game.
+
+Everything is registered with AccessTools and fails soft: a missing target is recorded in the log
+file and the rest of the patches stay active. Nothing is patched permanently outside these
+methods.
 
 Requires the mobile port (PortUI/RwHost present). Harmless on desktop RimWorld: the touch-only
 patches are simply skipped.</description>
