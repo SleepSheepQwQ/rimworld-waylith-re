@@ -708,7 +708,7 @@ lands on the first frame back — same as a `Background` event arriving just bef
   `MouseEvent_Prefix`, `OnTrimMemory_Prefix`, `ReleaseMouseButtons`, `ReleaseKeys`, and the literals
   `BUILD v8-inputrel`, `TRIM_MEMORY_UI_HIDDEN(20) treated as background`,
   `action up kept other buttons down`, `held mouse button(s)`, `held key(s)`.
-* assembly references are still exactly `0Harmony`, `Assembly-CSharp`, `System.Runtime` — no
+
   `RwHost` / `PortUI` / `Mono.Android` / `UnityEngine` reference was added by reading any of this
   through reflection, and the CI guard passes.
 * CI run **43462609399** (`d57be1b`), `dotnet build -c Release`: success, 0 errors.
@@ -870,8 +870,10 @@ absent `Diag.Install()` returns before patching anything.
   `GovernorPatches` in either string heap (0 occurrences, checked independently of CI with a Python
   scanner over the ASCII and UTF-16LE runs), and does contain `BUILD v9-notex`, `tips mode=`,
   `agenttouchfix.tips` and `glfwAndroidPushCursorPos`.
-* assembly references are still exactly `0Harmony`, `Assembly-CSharp`, `System.Runtime` — no
-  `RwHost` / `PortUI` / `Mono.Android` / `UnityEngine` / `Waylith` reference.
+* assembly references (metadata read with `dnfile`): `System.Runtime`, `0Harmony`, `Assembly-CSharp`,
+  `System.Collections`, `System.Threading` — no `RwHost` / `PortUI` / `Mono.Android` / `UnityEngine` /
+  `Waylith` reference (the last two `System.*` facades come from the v8 key dictionary and the
+  `Interlocked`-free bookkeeping, and are part of the runtime the game already loads).
 * CI run **43467145188** (`4f43b85`), `dotnet build -c Release`: **0 warnings, 0 errors**, reference
   guard OK, `no governor / texture patch: OK`, `tips switch literals: OK`.
 * `Assemblies/AgentTouchFix.dll` **68,096 bytes**, md5 `d48bef40573d96138a8c3c9bd35cf3de`
