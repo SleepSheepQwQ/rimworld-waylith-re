@@ -44,7 +44,7 @@ namespace AgentTouchFix
                 Refl.Info("drawcall: WITH-MATERIAL '" + name + "' " + Dims(image)
                     + " rect=" + Fmt(__args[0]) + " uv=" + Fmt(__args[2]) + " color=" + Fmt(__args[3])
                     + " material=" + (mat == null ? "null" : Name(mat))
-                    + " engine=" + EngineProps(pass));
+                    + " engine=" + EngineProps(mat));
             }
             catch (Exception e) { Warn(e.Message); }
         }
@@ -121,36 +121,51 @@ namespace AgentTouchFix
         }
 
 
-        /// <summary>v32: the values the shader will actually receive (the Unity material's properties
-        /// are what ResolveMaterialBindingData reads). Zero _MainTex_ST collapses the uv to a single
-        /// texel; zero _Color/_ColorTwo multiplies the icon away.</summary>
-        private static string EngineProps(object engineMaterial)
+        /// <summary>v33: read the values the shader will receive. The arguments are the Unity-shim
+        /// Material, so unwrap .engineMaterial first (and log the runtime type when that fails, so a
+        /// wrong assumption shows up immediately instead of as "n/a").</summary>
+        private static string EngineProps(object material)
         {
-            if (engineMaterial == null) return "null";
+            if (material == null) return "null";
             try
             {
-                string nm = null;
-                try { nm = engineMaterial.GetType().GetProperty("name")?.GetValue(engineMaterial, null) as string; } catch { }
-                MethodInfo getColor = null, getVector = null;
-                foreach (MethodInfo m in engineMaterial.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    ParameterInfo[] ps = m.GetParameters();
-                    if (ps.Length != 1) continue;
-                    if (m.Name == "GetColor" && (ps[0].ParameterType == typeof(string) || ps[0].ParameterType == typeof(int))) getColor = getColor ?? m;
-                    if (m.Name == "GetVector" && (ps[0].ParameterType == typeof(string) || ps[0].ParameterType == typeof(int))) getVector = getVector ?? m;
-                }
-                string arg = (getColor != null && getColor.GetParameters()[0].ParameterType == typeof(string)) ? "_Color" : null;
+                string typeName = material.GetType().FullName ?? "?";
+                object m = material;
+                object eng = Prop(m, "engineMaterial");
+                if (eng != null) m = eng;
+
+                MethodInfo getColor = Find1(m, "GetColor");
+                MethodInfo getVector = Find1(m, "GetVector");
+                if (getColor == null && getVector == null)
+                    return "[" + typeName + "] no-accessor";
+
+                string argKind = getColor != null ? getColor.GetParameters()[0].ParameterType.Name : "?";
                 object col = null, col2 = null, st = null;
-                if (getColor != null && arg != null)
+                try
                 {
-                    col = getColor.Invoke(engineMaterial, new object[] { "_Color" });
-                    col2 = getColor.Invoke(engineMaterial, new object[] { "_ColorTwo" });
+                    if (getColor != null && argKind == "String")
+                    {
+                        col = getColor.Invoke(m, new object[] { "_Color" });
+                        col2 = getColor.Invoke(m, new object[] { "_ColorTwo" });
+                    }
+                    if (getVector != null && getVector.GetParameters()[0].ParameterType == typeof(string))
+                        st = getVector.Invoke(m, new object[] { "_MainTex_ST" });
                 }
-                if (getVector != null && getVector.GetParameters()[0].ParameterType == typeof(string))
-                    st = getVector.Invoke(engineMaterial, new object[] { "_MainTex_ST" });
-                return (nm ?? "?") + " _Color=" + V(col) + " _ColorTwo=" + V(col2) + " _MainTex_ST=" + V(st);
+                catch (Exception e) { return "[" + typeName + "] invoke:" + e.Message; }
+                return "[" + typeName + "] _Color=" + V(col) + " _ColorTwo=" + V(col2) + " _MainTex_ST=" + V(st);
             }
             catch (Exception e) { return "err:" + e.Message; }
+        }
+
+        private static MethodInfo Find1(object o, string name)
+        {
+            foreach (MethodInfo m in o.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                ParameterInfo[] ps = m.GetParameters();
+                if (ps.Length == 1 && (ps[0].ParameterType == typeof(string) || ps[0].ParameterType == typeof(int)))
+                    return m;
+            }
+            return null;
         }
 
         private static string V(object v)
