@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 
 static void die(const char *msg) { fprintf(stderr, "harness: %s\n", msg); exit(2); }
 static void chk(VkResult r, const char *what) {
@@ -190,12 +191,21 @@ int main(int argc, char **argv)
         if (maskSize < (size_t)W * H * 4) die("mask texture too small");
     }
 
+    uint32_t maskW = W, maskH = H;
+    if (useMask && maskSize != (size_t)W * H * 4) {
+        /* square mask with its own extent */
+        size_t px = maskSize / 4;
+        uint32_t side = (uint32_t)(sqrt((double)px) + 0.5);
+        if ((size_t)side * side * 4 != maskSize) die("mask size is neither W*H nor square");
+        maskW = maskH = side;
+    }
+
     Image mainImg = make_image(pd, dev, VK_FORMAT_R8G8B8A8_UNORM, W, H,
                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                                VK_IMAGE_LAYOUT_UNDEFINED);
     Image maskImg;
     if (useMask)
-        maskImg = make_image(pd, dev, VK_FORMAT_R8G8B8A8_UNORM, W, H,
+        maskImg = make_image(pd, dev, VK_FORMAT_R8G8B8A8_UNORM, maskW, maskH,
                              VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                              VK_IMAGE_LAYOUT_UNDEFINED);
 
@@ -211,10 +221,12 @@ int main(int argc, char **argv)
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                           VK_IMAGE_LAYOUT_UNDEFINED);
 
-    /* upload buffers */
+    /* upload buffers: main at offset 0, mask at offset mainSize. Both copies are recorded before the
+       submission, so they must not share staging memory - that bug made every case sample the mask. */
     VkBuffer sBuf; VkDeviceMemory sMem;
     size_t sSize = (size_t)W * H * 4;
-    void *sp = make_buffer(pd, dev, sSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &sBuf, &sMem,
+    size_t maskBytes = useMask ? maskSize : 4;
+    void *sp = make_buffer(pd, dev, sSize + maskBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &sBuf, &sMem,
                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     /* uniforms: _Color, _MainTex_ST, _ColorTwo (std140 vec4 x3) */
@@ -278,22 +290,26 @@ int main(int argc, char **argv)
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
     if (useMask) {
-        memcpy(sp, maskPix, sSize);
+        memcpy((unsigned char *)sp + sSize, maskPix, maskBytes);
         barrier(cb, maskImg.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                 VK_PIPELINE_STAGE_TRANSFER_BIT);
-        vkCmdCopyBufferToImage(cb, sBuf, maskImg.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic);
+        VkBufferImageCopy mc = bic;
+        mc.bufferOffset = (VkDeviceSize)sSize;
+        mc.imageExtent.width = maskW; mc.imageExtent.height = maskH;
+        vkCmdCopyBufferToImage(cb, sBuf, maskImg.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &mc);
         barrier(cb, maskImg.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                 VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
     } else {
         unsigned char black[4] = { 0, 0, 0, 255 };
-        memcpy(sp, black, 4);
+        memcpy((unsigned char *)sp + sSize, black, 4);
         barrier(cb, blackImg.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                 VK_PIPELINE_STAGE_TRANSFER_BIT);
         VkBufferImageCopy b1 = bic;
+        b1.bufferOffset = (VkDeviceSize)sSize;
         b1.imageExtent.width = 1; b1.imageExtent.height = 1;
         vkCmdCopyBufferToImage(cb, sBuf, blackImg.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b1);
         barrier(cb, blackImg.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
