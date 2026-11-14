@@ -70,6 +70,12 @@ namespace AgentTouchFix
                     }
                 }
 
+                // v34: force the icon material's _MainTex_ST to the identity the shader expects
+                // (CutoutComplexUI reads it as (offset, scale); a non-default value collapses uv to a
+                // single corner texel and the fragment is discarded - a permanently blank tile).
+                if (!_noMaterial && _fMat != null && _fMat.GetValue(__instance) != null)
+                    IconTexST.Apply(__instance, _fMat);
+
                 object cur = _fUiIcon.GetValue(__instance);
                 if (cur != null) return;                       // the game resolved it
 
