@@ -27,6 +27,7 @@ namespace AgentTouchFix
         private static int _fixed;
         private static int _missed;
         private static int _warned;
+        private static int _entered;
 
         private static FieldInfo _fUiIcon, _fGraphic, _fDefName, _fMat;
         private static bool _noMaterial = false;   // v23: shipped behaviour (material kept)
@@ -41,6 +42,8 @@ namespace AgentTouchFix
             if (__instance == null) return;
             try
             {
+                if (Interlocked.Increment(ref _entered) == 1)
+                    Refl.Info("iconfix: ResolveIcon postfix reached (first call, type=" + __instance.GetType().Name + ")");
                 if (_fUiIcon == null) Resolve(__instance.GetType());
                 if (_fUiIcon == null) return;
 
