@@ -76,6 +76,10 @@ namespace AgentTouchFix
                 if (!_noMaterial && _fMat != null && _fMat.GetValue(__instance) != null)
                     IconTexST.Apply(__instance, _fMat);
 
+                // v37: one complete read-only dump per icon material (see MatDump.cs).
+                try { if (_fMat != null && _fMat.GetValue(__instance) != null) MatDump.Dump(__instance, _fMat, _fUiIcon, _fDefName); }
+                catch (Exception e) { WarnOnce("matdump: " + e.Message); }
+
                 object cur = _fUiIcon.GetValue(__instance);
                 if (cur != null) return;                       // the game resolved it
 
