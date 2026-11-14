@@ -417,24 +417,10 @@ namespace AgentTouchFix
             try { ResidencyFix.Install(); }
             catch (Exception e) { Refl.ErrOnce("resident-fix install failed: " + e); }
 
-            // v27: which stage of the material draw drops these tiles (read-only counters).
-            try { MaterialDrawProbe.Install(); }
-            catch (Exception e) { Refl.ErrOnce("matdraw probe install failed: " + e); }
-
             // v28: a NULL pipeline must not stay cached (it is cached as-is and then every frame
             // returns false, so the tile can never be drawn again).
             try { PipelineRetry.Install(); }
             catch (Exception e) { Refl.ErrOnce("pipeline-retry install failed: " + e); }
-
-            // v29: what is actually handed to the backend for each icon (rect/uv/color/material).
-            try { DrawCallProbe.Install(); }
-            catch (Exception e) { Refl.ErrOnce("drawcall probe install failed: " + e); }
-
-            // v35: the icon-material fix. IconFix was dropped when the mod went input-only in v25, so
-            // everything from v16-v34 was dead code - including the _MainTex_ST normalisation that the
-            // CutoutComplexUI shader needs. Reinstall it here (ResolveIcon postfix + texst normalise).
-            try { IconFix.Install(); }
-            catch (Exception e) { Refl.ErrOnce("iconfix install failed: " + e); }
 
             // v39: draw build-menu icons through the plain texture path, which is the one the icons
             // that already render use. The material path is the only place where a degenerate
@@ -450,6 +436,11 @@ namespace AgentTouchFix
                 catch (Exception e) { Refl.Warn("iconpath switch: " + e.Message); }
                 IconPlainPath.Init(imode);
                 IconPlainPath.Install();
+
+                // v40: repair uiIcon / uiIconMaterial at draw time - works whether or not ResolveIcon
+                // ran, and whether or not the material path is taken.
+                IconFieldFix.Init(imode);
+                IconFieldFix.Install();
             }
             catch (Exception e) { Refl.ErrOnce("iconpath install failed: " + e); }
 
@@ -457,7 +448,7 @@ namespace AgentTouchFix
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v39-iconpath (2.2.0) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
+            Refl.Info("BUILD v40-drawfix (2.3.0) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
 
