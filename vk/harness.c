@@ -243,7 +243,7 @@ int main(int argc, char **argv)
 
     /* readback buffer */
     VkBuffer rBuf; VkDeviceMemory rMem;
-    void *rp = make_buffer(pd, dev, sSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &rBuf, &rMem,
+    void *rbPtr = make_buffer(pd, dev, sSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &rBuf, &rMem,
                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     /* command pool/buffer */
@@ -405,13 +405,13 @@ int main(int argc, char **argv)
     rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpci.attachmentCount = 1; rpci.pAttachments = &att;
     rpci.subpassCount = 1; rpci.pSubpasses = &sub;
-    VkRenderPass rp;
-    chk(vkCreateRenderPass(dev, &rpci, NULL, &rp), "vkCreateRenderPass");
+    VkRenderPass renderPass;
+    chk(vkCreateRenderPass(dev, &rpci, NULL, &renderPass), "vkCreateRenderPass");
 
     VkImageView fbView = rt.view;
     VkFramebufferCreateInfo fci = {0};
     fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    fci.renderPass = rp; fci.attachmentCount = 1; fci.pAttachments = &fbView;
+    fci.renderPass = renderPass; fci.attachmentCount = 1; fci.pAttachments = &fbView;
     fci.width = W; fci.height = H; fci.layers = 1;
     VkFramebuffer fb;
     chk(vkCreateFramebuffer(dev, &fci, NULL, &fb), "vkCreateFramebuffer");
@@ -488,7 +488,7 @@ int main(int argc, char **argv)
     gpci.pMultisampleState = &ms;
     gpci.pColorBlendState = &cbs;
     gpci.layout = playout;
-    gpci.renderPass = rp;
+    gpci.renderPass = renderPass;
     gpci.subpass = 0;
     VkPipeline pipe;
     chk(vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &gpci, NULL, &pipe), "vkCreateGraphicsPipelines");
@@ -501,7 +501,7 @@ int main(int argc, char **argv)
     clear.color.float32[2] = 0; clear.color.float32[3] = 0;
     VkRenderPassBeginInfo rpbi = {0};
     rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpbi.renderPass = rp; rpbi.framebuffer = fb;
+    rpbi.renderPass = renderPass; rpbi.framebuffer = fb;
     rpbi.renderArea.extent.width = W; rpbi.renderArea.extent.height = H;
     rpbi.clearValueCount = 1; rpbi.pClearValues = &clear;
     vkCmdBeginRenderPass(cb, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
@@ -522,7 +522,7 @@ int main(int argc, char **argv)
     chk(vkQueueWaitIdle(q), "vkQueueWaitIdle(draw)");
 
     /* count surviving pixels + write a PPM for eyeballing */
-    unsigned char *out = (unsigned char *)rp;
+    unsigned char *out = (unsigned char *)rbPtr;
     size_t total = (size_t)W * H, drawn = 0;
     FILE *ppm = fopen(ppmPath, "wb");
     if (ppm) { fprintf(ppm, "P6\n%u %u\n255\n", W, H); }
