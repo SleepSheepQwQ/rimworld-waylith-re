@@ -157,6 +157,20 @@ namespace AgentTouchFix
             catch (Exception e) { return "err:" + e.Message; }
         }
 
+        private static object Prop(object o, string n)
+        {
+            if (o == null) return null;
+            try
+            {
+                foreach (PropertyInfo p in o.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    if (p.Name == n && p.GetIndexParameters().Length == 0) return p.GetValue(o, null);
+                foreach (FieldInfo f in o.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    if (f.Name == n) return f.GetValue(o);
+            }
+            catch { }
+            return null;
+        }
+
         private static MethodInfo Find1(object o, string name)
         {
             foreach (MethodInfo m in o.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
