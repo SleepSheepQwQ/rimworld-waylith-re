@@ -41,7 +41,7 @@ jobs:
           glslangValidator -V vk/CutoutComplex.frag.glsl -o build/frag.spv
 
       - name: Build harness
-        run: gcc -O2 -std=c11 -Wall -o build/harness vk/harness.c -lvulkan
+        run: gcc -O2 -std=c11 -Wall -o build/harness vk/harness.c -lvulkan -lm
 
       - name: Render the icon-material cases
         run: |
