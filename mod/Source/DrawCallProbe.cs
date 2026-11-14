@@ -41,6 +41,7 @@ namespace AgentTouchFix
 
                 object mat = __args[4];
                 object pass = __args[5];
+                MatDump.DumpMaterial(mat, image);
                 Refl.Info("drawcall: WITH-MATERIAL '" + name + "' " + Dims(image)
                     + " rect=" + Fmt(__args[0]) + " uv=" + Fmt(__args[2]) + " color=" + Fmt(__args[3])
                     + " material=" + (mat == null ? "null" : Name(mat))
