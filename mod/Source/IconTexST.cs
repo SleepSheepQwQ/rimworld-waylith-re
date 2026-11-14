@@ -53,6 +53,19 @@ namespace AgentTouchFix
                 object vec = MakeVector(setVector.GetParameters()[1].ParameterType, x, y, z, w);
                 if (vec == null) { WarnOnce("cannot construct Vector4"); return; }
 
+                // Read the value the shader would have received, by reflection, before touching it.
+                string was = "absent(default)";
+                try
+                {
+                    MethodInfo has = FindOne(mat, "HasProperty");
+                    object hasRes = has == null ? null : has.Invoke(mat, new object[] { "_MainTex_ST" });
+                    bool present = hasRes is bool hb && hb;
+                    MethodInfo getv = FindOne(mat, "GetVector");
+                    object cur = getv == null ? null : getv.Invoke(mat, new object[] { "_MainTex_ST" });
+                    was = (present ? "set" : "absent(default)") + "=" + V(cur);
+                }
+                catch { }
+
                 setVector.Invoke(mat, new object[] { "_MainTex_ST", vec });
                 int n = Interlocked.Increment(ref _ok);
 
@@ -60,7 +73,8 @@ namespace AgentTouchFix
                 bool first;
                 lock (_logged) first = _logged.Add(name);
                 if (first && _logged.Count <= 12)
-                    Refl.Info("texst: " + name + " <- (" + x + "," + y + "," + z + "," + w + ")"
+                    Refl.Info("texst: " + name + " was " + was
+                        + " -> (" + x + "," + y + "," + z + "," + w + ")"
                         + " flipV=" + flipV + " scaleFirst=" + scaleFirst);
                 else if (n % 200 == 0)
                     Refl.Info("texst: normalised " + n + " icon materials");
@@ -100,6 +114,35 @@ namespace AgentTouchFix
             }
             catch { }
             return null;
+        }
+
+        private static MethodInfo FindOne(object o, string name)
+        {
+            foreach (MethodInfo m in o.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                ParameterInfo[] ps = m.GetParameters();
+                if (ps.Length == 1 && ps[0].ParameterType == typeof(string) && m.Name == name) return m;
+            }
+            return null;
+        }
+
+        private static string V(object v)
+        {
+            if (v == null) return "?";
+            try
+            {
+                var sb = new System.Text.StringBuilder("(");
+                bool first = true;
+                foreach (FieldInfo f in v.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!first) sb.Append(',');
+                    first = false;
+                    object x = f.GetValue(v);
+                    sb.Append(x is float fl ? fl.ToString("0.###") : x);
+                }
+                return sb.Append(')').ToString();
+            }
+            catch { return "?"; }
         }
 
         private static MethodInfo FindSetVector(object mat)
