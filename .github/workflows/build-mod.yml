@@ -35,6 +35,12 @@ jobs:
       - name: Harmony generic-prefix probe
         run: dotnet run --project tests/HarmonyProbe/HarmonyProbe.csproj -c Release
 
+      # Minimal unit tests for the shader-side math (no game assemblies, no Vulkan, no device):
+      # proves the _MainTex_ST identity survives the engine transform and that a Unity-order value
+      # collapses the uv onto the transparent corner, i.e. reproduces the blank-tile failure mode.
+      - name: Unit tests (icon-material _MainTex_ST math)
+        run: dotnet test tests/TexSt/TexSt.csproj -c Release -v minimal
+
       - name: Build AgentTouchFix
         run: dotnet build mod/AgentTouchFix.csproj -c Release -v minimal
 
