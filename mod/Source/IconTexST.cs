@@ -43,10 +43,8 @@ namespace AgentTouchFix
                 object stages = Prop(shader, "PrecompiledStages");
                 bool scaleFirst = stages != null && Bool(Prop(stages, "ScaleOffsetTextureST"));
 
-                // Identity in shader space, then invert the engine's transform.
-                float x = 0f, y = 0f, z = 1f, w = 1f;
-                if (scaleFirst) { x = 1f; y = 1f; z = 0f; w = 0f; }   // reorder is its own inverse
-                if (flipV) { y = 1f - y; w = -w; }                     // Y flips, W negates
+                // Identity in shader space, then invert the engine's transform (TexStMath, unit-tested).
+                TexStMath.PropertyForIdentity(out float x, out float y, out float z, out float w, flipV, scaleFirst);
 
                 MethodInfo setVector = FindSetVector(mat);
                 if (setVector == null) { WarnOnce("no SetVector(string, Vector4) on " + mat.GetType().FullName); return; }
