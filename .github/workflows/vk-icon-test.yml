@@ -1,0 +1,49 @@
+name: vk-icon-test
+
+# Runs the CutoutComplexUI material path on software Vulkan (lavapipe) with the real icon
+# textures, so the icon-tile behaviour is measured on CI instead of on the phone.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'vk/**'
+      - '.github/workflows/vk-icon-test.yml'
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan + shader tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libvulkan-dev vulkan-tools mesa-vulkan-drivers glslang-tools
+
+      - name: Show software device
+        run: |
+          export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          vulkaninfo --summary || true
+
+      - name: Compile shaders
+        run: |
+          mkdir -p build
+          glslangValidator -V vk/quad.vert -o build/quad.spv
+          glslangValidator -V vk/CutoutComplex.frag.glsl -o build/frag.spv
+
+      - name: Build harness
+        run: gcc -O2 -std=c11 -Wall -o build/harness vk/harness.c -lvulkan
+
+      - name: Render the icon-material cases
+        run: |
+          export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          bash vk/run_cases.sh build
+
+      - name: Upload renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vk-icon-renders
+          path: build/*.ppm
+          if-no-files-found: ignore
