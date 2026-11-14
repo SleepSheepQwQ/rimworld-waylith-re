@@ -42,13 +42,58 @@ namespace AgentTouchFix
                 lock (_seen) first = _seen.Add(key);
                 if (!first) return;
 
+                object mat = Prop(draw, "Material");
                 Refl.Info("record: '" + name + "' materialDraw=" + (__result ? "OK" : "FAILED")
-                    + " fallbackTexId=" + (fallback ?? "?"));
+                    + " fallbackTexId=" + (fallback ?? "?")
+                    + " mat=" + MatProps(mat));
             }
             catch (Exception e)
             {
                 if (Interlocked.Exchange(ref _warned, 1) == 0) Refl.Warn("record: " + e.Message);
             }
+        }
+
+
+        /// <summary>v31: read the values the shader will actually receive - a zero _Color or a zero
+        /// _MainTex_ST makes the icon perfectly invisible while every other stage looks healthy.</summary>
+        private static string MatProps(object mat)
+        {
+            if (mat == null) return "null";
+            try
+            {
+                string nm = Prop(mat, "name") as string ?? "?";
+                MethodInfo getColorStr = null, getVecStr = null, hasProp = null;
+                foreach (MethodInfo m in mat.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (m.Name == "GetColor" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string)) getColorStr = m;
+                    else if (m.Name == "GetVector" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string)) getVecStr = m;
+                }
+                object col = getColorStr == null ? null : getColorStr.Invoke(mat, new object[] { "_Color" });
+                object col2 = getColorStr == null ? null : getColorStr.Invoke(mat, new object[] { "_ColorTwo" });
+                object st = getVecStr == null ? null : getVecStr.Invoke(mat, new object[] { "_MainTex_ST" });
+                return nm + " _Color=" + V(col) + " _ColorTwo=" + V(col2) + " _MainTex_ST=" + V(st);
+            }
+            catch (Exception e) { return "err:" + e.Message; }
+        }
+
+        private static string V(object v)
+        {
+            if (v == null) return "null";
+            try
+            {
+                Type t = v.GetType();
+                var sb = new System.Text.StringBuilder("(");
+                bool first = true;
+                foreach (FieldInfo f in t.GetFields(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!first) sb.Append(',');
+                    first = false;
+                    object x = f.GetValue(v);
+                    sb.Append(x is float fl ? fl.ToString("0.###") : x);
+                }
+                return sb.Append(')').ToString();
+            }
+            catch { return "?"; }
         }
 
         private static object Prop(object o, string n)
