@@ -67,6 +67,40 @@ namespace AgentTouchFix
             catch (Exception e) { WarnOnce(e.Message); }
         }
 
+        /// <summary>Same dump, driven from a draw call: the material and the image being drawn are
+        /// both in hand, so this works even if ResolveIcon never fires.</summary>
+        internal static void DumpMaterial(object mat, object image)
+        {
+            if (mat == null) return;
+            string key = (Prop(mat, "name") as string) ?? ("#" + mat.GetType().Name);
+            lock (_seenMat) { if (!_seenMat.Add(key)) return; if (_seenMat.Count > 16) return; }
+            try
+            {
+                object eng = Prop(mat, "engineMaterial");
+                object shader = eng != null ? Prop(eng, "Shader") : Prop(mat, "shader");
+                object layout = Prop(shader, "MaterialLayout");
+
+                Refl.Info("matdump[draw] " + key
+                    + " shader=" + (Prop(shader, "name") as string ?? "?")
+                    + " hasErrors=" + Prop(shader, "HasErrors")
+                    + " flipV=" + Prop(shader, "FlipTextureST")
+                    + " precompiled=" + (Prop(shader, "PrecompiledStages") != null)
+                    + " image=" + (image == null ? "null" : (Prop(image, "name") as string ?? "?")) + " " + Dim(image));
+                Refl.Info("matdump    texslots: " + Slots(Prop(layout, "TextureSlots"), "PropertyName", "ResourceSlot", "Kind"));
+                Refl.Info("matdump    unislots: " + Slots(Prop(layout, "UniformSlots"), "PropertyName", "Offset", "Type"));
+                Refl.Info("matdump    props: _MainTex=" + Has(mat, "_MainTex") + " " + TexName(mat, "_MainTex")
+                    + " | _MaskTex=" + Has(mat, "_MaskTex") + " " + TexName(mat, "_MaskTex")
+                    + " | _Color=" + Vec(mat, "_Color")
+                    + " | _ColorTwo=" + Vec(mat, "_ColorTwo")
+                    + " | _MainTex_ST=" + Has(mat, "_MainTex_ST") + " " + Vec(mat, "_MainTex_ST")
+                    + " | sameAsImage=" + ReferenceEquals(Prop(mat, "_MainTex"), image));
+            }
+            catch (Exception e) { WarnOnce(e.Message); }
+        }
+
+        private static readonly System.Collections.Generic.HashSet<string> _seenMat =
+            new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+
         private static string Slots(object arr, string f1, string f2, string f3)
         {
             if (!(arr is Array a)) return "n/a";
