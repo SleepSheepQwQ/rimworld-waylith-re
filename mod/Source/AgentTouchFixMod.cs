@@ -430,11 +430,17 @@ namespace AgentTouchFix
             try { DrawCallProbe.Install(); }
             catch (Exception e) { Refl.ErrOnce("drawcall probe install failed: " + e); }
 
+            // v35: the icon-material fix. IconFix was dropped when the mod went input-only in v25, so
+            // everything from v16-v34 was dead code - including the _MainTex_ST normalisation that the
+            // CutoutComplexUI shader needs. Reinstall it here (ResolveIcon postfix + texst normalise).
+            try { IconFix.Install(); }
+            catch (Exception e) { Refl.ErrOnce("iconfix install failed: " + e); }
+
 
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v34-texst (2.1.9) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
+            Refl.Info("BUILD v35-iconst (2.1.10) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
 
