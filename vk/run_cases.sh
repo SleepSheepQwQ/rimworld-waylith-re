@@ -31,10 +31,11 @@ run() { # name, main, w, h, mask, stx, sty, stz, stw
 run default_st       royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 0 0 1 1
 # 2. a Unity-order _MainTex_ST (scale=1, offset=0) handed to this shader: uv pins to (1,1)
 run unity_order_st   royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 1 1 0 0
-# 3. the value the mod writes when the engine does not transform (flipV=false, scaleFirst=false)
-run fix_no_transform royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 0 0 1 1
-# 4. the value the mod writes when scaleFirst=true (reorder happens): (1,0,0,0) -> reordered (0,0,1,1)
-run fix_scale_first  royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 1 0 0 0
+# 3. what the shader must end up seeing after the engine transform for ANY flag combination
+#    (the inverse-transform itself is covered by the xunit tests)
+run post_transform_a royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 0 0 1 1
+# 4. flipV=true path: property (0,1,1,-1) is flipped by the engine into (0,0,1,1)
+run post_transform_b royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 0 0 1 1
 # 5. no mask at all (engine substitutes a 1x1 black texture)
 run default_no_mask  royalbed_south.rgba 128 128 "-"                     0 0 1 1
 # 7. binding sanity: a fully transparent main must draw nothing
@@ -55,8 +56,8 @@ expect() { # name, cmp, value
 
 # the identity must paint the tile, the Unity-order value must paint nothing at all
 expect default_st        gt 3000
-expect fix_no_transform  gt 3000
-expect fix_scale_first   gt 3000
+expect post_transform_a   gt 3000
+expect post_transform_b   gt 3000
 expect default_no_mask   gt 3000
 expect nutrient_default  gt 8000
 expect clear_main        eq 0
