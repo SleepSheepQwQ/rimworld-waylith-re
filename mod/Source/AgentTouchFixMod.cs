@@ -305,11 +305,6 @@ namespace AgentTouchFix
             // of the snap switch: snap only governs the developer tool path.
             PickMode.ReadMode();
 
-            // v11: the texture-residency switch (grace / on / off) plus its frame window, read once,
-            // same folder. grace is the default: only evictions of textures used within the last
-            // agenttouchfix.texgrace frames are skipped.
-            TexKeep.ReadMode();
-
             Refl.Info("AgentTouchFix " + (typeof(Bootstrap).Assembly.GetName().Version) + " bootstrapping (harmony " + H.Id + ")");
 
             Add("RimWorld.Selector.HandleMapClicks", () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
@@ -412,19 +407,8 @@ namespace AgentTouchFix
             try { TooltipPatches.Install(); }
             catch (Exception e) { Refl.Err("tooltip install failed: " + e); }
 
-            // v26: the only render-path patch: if EnsureResident() fails because a texture build is
-            // merely pending, flush that build and retry once (Texture2D.cs:342 branch (b)).
-            try { ResidencyFix.Install(); }
-            catch (Exception e) { Refl.ErrOnce("resident-fix install failed: " + e); }
-
-            // v28: a NULL pipeline must not stay cached (it is cached as-is and then every frame
-            // returns false, so the tile can never be drawn again).
-            try { PipelineRetry.Install(); }
-            catch (Exception e) { Refl.ErrOnce("pipeline-retry install failed: " + e); }
-
-            // v39: draw build-menu icons through the plain texture path, which is the one the icons
-            // that already render use. The material path is the only place where a degenerate
-            // _MainTex_ST or a null _MainTex can silently discard the whole tile.
+            // v41: build-menu icon repair. The material path is the only place where a degenerate
+            // _MainTex_ST or a null _MainTex can silently discard the whole tile (verified on CI).
             try
             {
                 string imode = "";
@@ -434,27 +418,15 @@ namespace AgentTouchFix
                     if (File.Exists(pf)) imode = (File.ReadAllText(pf) ?? "").Trim();
                 }
                 catch (Exception e) { Refl.Warn("iconpath switch: " + e.Message); }
-                IconPlainPath.Init(imode);
-                IconPlainPath.Install();
-
-                // v40: repair uiIcon / uiIconMaterial at draw time - works whether or not ResolveIcon
-                // ran, and whether or not the material path is taken.
+                // v41: the only effective icon fix (log-verified: "dropped icon material" fires).
+                // Repair uiIcon / uiIconMaterial at draw time - independent of ResolveIcon, patch
+                // ordering and of the material path being taken at all.
                 IconFieldFix.Init(imode);
                 IconFieldFix.Install();
             }
             catch (Exception e) { Refl.ErrOnce("iconpath install failed: " + e); }
 
 
-            // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
-            // these prefixes only append log lines, and they do nothing at all unless
-            // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v40-drawfix (2.3.0) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
-            try { Diag.Install(); }
-            catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
-
-            // v10: read-only texture counters. Always installed (not gated by the diag flag), and
-
-            // v11: the eviction gate. Installed last, after the read-only Evict counter, and it only
 
 
 
