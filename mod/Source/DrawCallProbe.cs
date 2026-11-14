@@ -44,7 +44,7 @@ namespace AgentTouchFix
                 Refl.Info("drawcall: WITH-MATERIAL '" + name + "' " + Dims(image)
                     + " rect=" + Fmt(__args[0]) + " uv=" + Fmt(__args[2]) + " color=" + Fmt(__args[3])
                     + " material=" + (mat == null ? "null" : Name(mat))
-                    + " shader=" + ShaderName(pass));
+                    + " engine=" + EngineProps(pass));
             }
             catch (Exception e) { Warn(e.Message); }
         }
@@ -118,6 +118,58 @@ namespace AgentTouchFix
             }
             catch { }
             return "?";
+        }
+
+
+        /// <summary>v32: the values the shader will actually receive (the Unity material's properties
+        /// are what ResolveMaterialBindingData reads). Zero _MainTex_ST collapses the uv to a single
+        /// texel; zero _Color/_ColorTwo multiplies the icon away.</summary>
+        private static string EngineProps(object engineMaterial)
+        {
+            if (engineMaterial == null) return "null";
+            try
+            {
+                string nm = null;
+                try { nm = engineMaterial.GetType().GetProperty("name")?.GetValue(engineMaterial, null) as string; } catch { }
+                MethodInfo getColor = null, getVector = null;
+                foreach (MethodInfo m in engineMaterial.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    ParameterInfo[] ps = m.GetParameters();
+                    if (ps.Length != 1) continue;
+                    if (m.Name == "GetColor" && (ps[0].ParameterType == typeof(string) || ps[0].ParameterType == typeof(int))) getColor = getColor ?? m;
+                    if (m.Name == "GetVector" && (ps[0].ParameterType == typeof(string) || ps[0].ParameterType == typeof(int))) getVector = getVector ?? m;
+                }
+                string arg = (getColor != null && getColor.GetParameters()[0].ParameterType == typeof(string)) ? "_Color" : null;
+                object col = null, col2 = null, st = null;
+                if (getColor != null && arg != null)
+                {
+                    col = getColor.Invoke(engineMaterial, new object[] { "_Color" });
+                    col2 = getColor.Invoke(engineMaterial, new object[] { "_ColorTwo" });
+                }
+                if (getVector != null && getVector.GetParameters()[0].ParameterType == typeof(string))
+                    st = getVector.Invoke(engineMaterial, new object[] { "_MainTex_ST" });
+                return (nm ?? "?") + " _Color=" + V(col) + " _ColorTwo=" + V(col2) + " _MainTex_ST=" + V(st);
+            }
+            catch (Exception e) { return "err:" + e.Message; }
+        }
+
+        private static string V(object v)
+        {
+            if (v == null) return "n/a";
+            try
+            {
+                var sb = new StringBuilder("(");
+                bool first = true;
+                foreach (FieldInfo f in v.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!first) sb.Append(',');
+                    first = false;
+                    object x = f.GetValue(v);
+                    sb.Append(x is float fl ? fl.ToString("0.###") : x);
+                }
+                return sb.Append(')').ToString();
+            }
+            catch { return "?"; }
         }
 
         private static string Fmt(object v)
