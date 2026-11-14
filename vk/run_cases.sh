@@ -13,7 +13,9 @@ fail=0
 run() { # name, main, w, h, mask, stx, sty, stz, stw
   local name="$1" main="$2" w="$3" h="$4" mask="$5"
   local out
-  out=$("$H" "$FRAG" "$VERT" "$A/$main" "$w" "$h" "$A/$mask" "$6" "$7" "$8" "$9" "$BIN/$name.ppm" 2>&1) || {
+  local maskarg="$A/$mask"
+  [ "$mask" = "-" ] && maskarg="-"
+  out=$("$H" "$FRAG" "$VERT" "$A/$main" "$w" "$h" "$maskarg" "$6" "$7" "$8" "$9" "$BIN/$name.ppm" 2>&1) || {
     echo "CASE $name: harness failed"; echo "$out"; fail=1; return
   }
   local drawn total
@@ -35,8 +37,10 @@ run fix_no_transform royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 0 0 
 run fix_scale_first  royalbed_south.rgba 128 128 "royalbed_south_mask.rgba" 1 0 0 0
 # 5. no mask at all (engine substitutes a 1x1 black texture)
 run default_no_mask  royalbed_south.rgba 128 128 "-"                     0 0 1 1
+# 7. binding sanity: a fully transparent main must draw nothing
+run clear_main       clear.rgba         128 128 "royalbed_south_mask.rgba" 0 0 1 1
 # 6. the other reported icon
-run nutrient_default nutrient_north.rgba 192 256 "royalbed_south_mask.rgba" 0 0 1 1
+run nutrient_default nutrient_north.rgba 192 256 "-"                     0 0 1 1
 
 expect() { # name, cmp, value
   local name="$1" cmp="$2" want="$3"
@@ -55,6 +59,7 @@ expect fix_no_transform  gt 3000
 expect fix_scale_first   gt 3000
 expect default_no_mask   gt 3000
 expect nutrient_default  gt 8000
+expect clear_main        eq 0
 expect unity_order_st    eq 0
 
 echo
