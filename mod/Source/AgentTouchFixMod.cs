@@ -436,11 +436,28 @@ namespace AgentTouchFix
             try { IconFix.Install(); }
             catch (Exception e) { Refl.ErrOnce("iconfix install failed: " + e); }
 
+            // v39: draw build-menu icons through the plain texture path, which is the one the icons
+            // that already render use. The material path is the only place where a degenerate
+            // _MainTex_ST or a null _MainTex can silently discard the whole tile.
+            try
+            {
+                string imode = "";
+                try
+                {
+                    const string pf = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.iconpath";
+                    if (File.Exists(pf)) imode = (File.ReadAllText(pf) ?? "").Trim();
+                }
+                catch (Exception e) { Refl.Warn("iconpath switch: " + e.Message); }
+                IconPlainPath.Init(imode);
+                IconPlainPath.Install();
+            }
+            catch (Exception e) { Refl.ErrOnce("iconpath install failed: " + e); }
+
 
             // v3-diagnostic: read-only instrumentation (DiagPatches.cs). Behaviour is unchanged;
             // these prefixes only append log lines, and they do nothing at all unless
             // files/game/agenttouchfix.diag exists. Runs last so the fix summary is never buried.
-            Refl.Info("BUILD v38-dumpall (2.1.13) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
+            Refl.Info("BUILD v39-iconpath (2.2.0) - input layer only (tool click + snap, pick, double-tap select-all, IME, focus-loss release, ACTION_UP fix, SecondUp reset, tooltip park). ONE render patch: EnsureResident() flushes a pending build and retries once (that branch made build icons blank/flicker). No eviction/atlas/upload/cache/governor patch.");
             try { Diag.Install(); }
             catch (Exception e) { Refl.ErrOnce("diag install failed: " + e); }
 
