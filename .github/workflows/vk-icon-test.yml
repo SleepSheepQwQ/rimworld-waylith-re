@@ -21,9 +21,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libvulkan-dev vulkan-tools mesa-vulkan-drivers glslang-tools
 
+      - name: Find the software ICD
+        run: |
+          dpkg -L mesa-vulkan-drivers | grep -i icd || true
+          ls -l /usr/share/vulkan/icd.d/ || true
+          ICD=$(find /usr -name 'lvp_icd*.json' 2>/dev/null | head -1)
+          echo "found ICD: ${ICD:-none}"
+          echo "ICD=$ICD" >> "$GITHUB_ENV"
+
       - name: Show software device
         run: |
-          export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          if [ -n "${ICD:-}" ]; then export VK_ICD_FILENAMES="$ICD"; fi
           vulkaninfo --summary || true
 
       - name: Compile shaders
@@ -37,7 +45,8 @@ jobs:
 
       - name: Render the icon-material cases
         run: |
-          export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          if [ -n "${ICD:-}" ]; then export VK_ICD_FILENAMES="$ICD"; fi
+          env | grep -i -E '^ICD=|VK_' || true
           bash vk/run_cases.sh build
 
       - name: Upload renders
