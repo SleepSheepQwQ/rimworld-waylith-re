@@ -21,7 +21,11 @@ namespace AgentDevTools
         private const string ModePath =
             "/data/data/com.ports1de.waylith/files/game/agentdevtools.mode";
 
-        private static readonly HarmonyLib.Harmony H = new HarmonyLib.Harmony("sleepsheep.waylith.agentdevtools");
+        // created inside the try: a Harmony failure must degrade to "mod inert", never to a
+        // TypeInitializationException escaping [StaticConstructorOnStartup]
+        private static HarmonyLib.Harmony H;
+        private const string HarmonyId = "sleepsheep.waylith.agentdevtools";
+        private static bool _installed;
 
         private static int _ok, _failed;
 
@@ -29,6 +33,10 @@ namespace AgentDevTools
         {
             try
             {
+                if (_installed) { Refl.Info("already installed in this process, skipping"); return; }
+                _installed = true;
+                H = new HarmonyLib.Harmony(HarmonyId);
+
                 int mode = ReadMode();
                 Refl.Info("AgentDevTools " + typeof(Bootstrap).Assembly.GetName().Version
                           + " bootstrapping, mode=" + SnapPolicy.Name(mode));
@@ -39,7 +47,7 @@ namespace AgentDevTools
                     return;
                 }
 
-                SnapGeometry.ReadMode();
+                SnapGeometry.ReadMode(mode);
                 PickMode.ReadMode();
 
                 Patch("RimWorld.Selector.HandleMapClicks",
@@ -84,6 +92,22 @@ namespace AgentDevTools
             catch { return SnapPolicy.Auto; }
         }
 
+        private static string Signature(MethodBase m)
+        {
+            try
+            {
+                var ps = m.GetParameters();
+                var sb = new System.Text.StringBuilder(m.Name).Append('(');
+                for (int i = 0; i < ps.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(ps[i].ParameterType.Name);
+                }
+                return sb.Append(')').ToString();
+            }
+            catch { return m.Name + "(?)"; }
+        }
+
         private static MethodInfo MI(Type t, string name)
         {
             foreach (MethodInfo m in t.GetMethods(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public))
@@ -99,6 +123,8 @@ namespace AgentDevTools
                 if (t == null || prefix == null) { Refl.Warn("skip " + label + " (target or prefix missing)"); _failed++; return; }
                 H.Patch(t, new HarmonyMethod(prefix));
                 _ok++;
+                Refl.Info("patched " + label + " -> " + Signature(t)
+                          + " in " + t.DeclaringType.Assembly.GetName().Name);
             }
             catch (Exception e) { Refl.Warn("patch " + label + " failed: " + e.Message); _failed++; }
         }
