@@ -15,10 +15,13 @@
     <NoWarn>$(NoWarn);CS1701;CS1702;MSB3277;MSB3245</NoWarn>
   </PropertyGroup>
 
-  <!-- never compile generated assembly info twice -->
+  <!-- explicit item list: default globbing picked up generated files under obj/ -->
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
   <ItemGroup>
-    <Compile Remove="obj/**/*.cs" />
-    <Compile Remove="bin/**/*.cs" />
+    <Compile Include="src/**/*.cs" />
   </ItemGroup>
 
   <!-- The engine layer talks to the port's own types (Thing, IntVec3, Vector3), so it needs the
