@@ -37,7 +37,9 @@ namespace AgentDevTools
             Write("ERROR", m);
             if (Interlocked.Exchange(ref _errLogged, 1) == 0)
             {
-                try { Log.Error(P + m); } catch { }
+                // Log.Error opens the port's "there were errors" dialog; a single Log.Message is
+                // visible in the console without interrupting the player.
+                try { Log.Message(P + m); } catch { }
             }
         }
 
@@ -81,31 +83,31 @@ namespace AgentDevTools
 
         internal static Type T(string fullName)
         {
-            try
+            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+                try
                 {
                     Type t = a.GetType(fullName, false);
                     if (t != null) return t;
                 }
+                catch { }   // one broken assembly must not abort the whole scan
             }
-            catch { }
             return null;
         }
 
         /// <summary>Resolve a type in a named assembly first, then anywhere.</summary>
         internal static Type TPrefer(string assemblyName, string fullName)
         {
-            try
+            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+                try
                 {
                     if (!string.Equals(a.GetName().Name, assemblyName, StringComparison.Ordinal)) continue;
                     Type t = a.GetType(fullName, false);
                     if (t != null) return t;
                 }
+                catch { }
             }
-            catch { }
             return T(fullName);
         }
 
