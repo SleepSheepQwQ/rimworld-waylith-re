@@ -38,7 +38,7 @@ namespace AgentDevTools
                 H = new HarmonyLib.Harmony(HarmonyId);
 
                 int mode = ReadMode();
-                Refl.Info("AgentDevTools " + typeof(Bootstrap).Assembly.GetName().Version
+                Refl.Info("BUILD 1.1.0 / AgentDevTools " + typeof(Bootstrap).Assembly.GetName().Version
                           + " bootstrapping, mode=" + SnapPolicy.Name(mode));
 
                 if (mode == SnapPolicy.Off)
