@@ -37,7 +37,8 @@ namespace AgentDevTools
         internal const int Exact = 1;
 
         /// <summary>Same folder as agenttouchfix.log / .diag / .snap / .tips.</summary>
-        internal const string ModePath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.pick";
+        internal const string ModePath = "/data/data/com.ports1de.waylith/files/game/agentdevtools.pick";
+        internal const string LegacyModePath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.pick";
 
         private static int _mode = Port;         // port == ship behaviour
 
@@ -65,6 +66,7 @@ namespace AgentDevTools
             try
             {
                 if (File.Exists(ModePath)) raw = File.ReadAllText(ModePath);
+                else if (File.Exists(LegacyModePath)) raw = File.ReadAllText(LegacyModePath);
             }
             catch (Exception e)
             {
@@ -141,7 +143,7 @@ namespace AgentDevTools
         private static void LogSkipped()
         {
             long now;
-            try { now = Environment.TickCount64; } catch { now = 0L; }
+            try { now = Environment.TickCount; } catch { now = 0L; }
             if (now - _lastLogMs < 2000L) return;
             _lastLogMs = now;
             Refl.Info("pick mode=exact skipped-radius=" + _skipped);
