@@ -30,7 +30,7 @@ jobs:
         run: |
           DLL=$(find devtools/bin/Release -name AgentDevTools.dll | head -1)
           test -n "$DLL" || { echo "AgentDevTools.dll not found"; exit 1; }
-          mkdir -p dist/AgentDevTools/Assemblies
+          mkdir -p dist/AgentDevTools/About dist/AgentDevTools/Assemblies
           cp devtools/mod/About/About.xml dist/AgentDevTools/About/
           cp "$DLL" dist/AgentDevTools/Assemblies/
           python3 - <<'PY'
