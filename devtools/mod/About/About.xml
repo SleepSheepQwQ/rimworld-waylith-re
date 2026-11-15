@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>AgentDevTools</name>
+  <author>sleepsheep</author>
+  <packageId>sleepsheep.waylith.devtools</packageId>
+  <modVersion>1.0.0</modVersion>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+  <description>Precise tapping for the developer tools in the RimWorld 1.7 Android (Waylith) port.
+
+  The port plays taps on the map through its own touch layer, which reports a nearest object instead of the cell the finger is actually on - so debug tools (kill, destroy, damage, spawn) hit the wrong target or nothing at all.
+
+  This mod translates the tap into the exact cell and only snaps to an object when the finger really lands on it. Three modes (off / auto / always) via files/game/agentdevtools.mode; every click is logged with the decision it took.
+
+  No game file is modified; everything is applied at runtime with Harmony.</description>
+</ModMetaData>
