@@ -1,0 +1,133 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using HarmonyLib;
+using Verse;
+
+namespace AgentDevTools
+{
+    /// <summary>
+    /// Entry point and the only place where patches are installed.
+    ///
+    /// Design rules enforced here:
+    ///   * every patch is installed inside its own try/catch - one missing target must never take the
+    ///     others (or the game) down;
+    ///   * nothing is patched at all in mode "off";
+    ///   * the summary line is written once, to the file, so the user can prove what is active.
+    /// </summary>
+    [StaticConstructorOnStartup]
+    internal static class Bootstrap
+    {
+        private const string ModePath =
+            "/data/data/com.ports1de.waylith/files/game/agentdevtools.mode";
+
+        private static readonly HarmonyLib.Harmony H = new HarmonyLib.Harmony("sleepsheep.waylith.agentdevtools");
+
+        private static int _ok, _failed;
+
+        static Bootstrap()
+        {
+            try
+            {
+                int mode = ReadMode();
+                Refl.Info("AgentDevTools " + typeof(Bootstrap).Assembly.GetName().Version
+                          + " bootstrapping, mode=" + SnapPolicy.Name(mode));
+
+                if (mode == SnapPolicy.Off)
+                {
+                    Refl.Info("mode=off: no patch installed, the port keeps its own behaviour");
+                    return;
+                }
+
+                SnapGeometry.ReadMode();
+                PickMode.ReadMode();
+
+                Patch("RimWorld.Selector.HandleMapClicks",
+                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
+                      MI(typeof(ToolPatches), "HandleMapClicks_Prefix"));
+
+                Patch("PortUI.MobileSelectionController.Tap",
+                      () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Tap"),
+                      MI(typeof(ToolPatches), "Tap_Prefix"));
+
+                Patch("Verse.UI.MouseCell",
+                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseCell"),
+                      MI(typeof(ToolPatches), "MouseCell_Prefix"));
+
+                PatchClosed("Verse.UI.MouseMapPosition",
+                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseMapPosition"),
+                      "MouseMapPosition_Prefix", typeof(ToolPatches));
+
+                PatchClosed("PortUI.Candidates",
+                      () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Candidates"),
+                      "Candidates_Prefix", typeof(PickMode));
+
+                Refl.Info("AgentDevTools " + (_failed == 0 ? "ready" : "degraded")
+                          + ": patches ok=" + _ok + " failed=" + _failed
+                          + ", snap=" + SnapGeometry.ModeName(SnapGeometry.Mode)
+                          + ", pick=" + PickMode.ModeName(PickMode.Mode));
+            }
+            catch (Exception e) { Refl.ErrOnce("bootstrap failed: " + e); }
+        }
+
+        /// <summary>agentdevtools.mode: "off" | "auto" (default) | "always".</summary>
+        private static int ReadMode()
+        {
+            try
+            {
+                if (!System.IO.File.Exists(ModePath)) return SnapPolicy.Auto;
+                string v = (System.IO.File.ReadAllText(ModePath) ?? "").Trim().ToLowerInvariant();
+                if (v.StartsWith("off")) return SnapPolicy.Off;
+                if (v.StartsWith("always")) return SnapPolicy.Always;
+                return SnapPolicy.Auto;
+            }
+            catch { return SnapPolicy.Auto; }
+        }
+
+        private static MethodInfo MI(Type t, string name)
+        {
+            foreach (MethodInfo m in t.GetMethods(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public))
+                if (m.Name == name) return m;
+            return null;
+        }
+
+        private static void Patch(string label, Func<MethodBase> target, MethodInfo prefix)
+        {
+            try
+            {
+                MethodBase t = target();
+                if (t == null || prefix == null) { Refl.Warn("skip " + label + " (target or prefix missing)"); _failed++; return; }
+                H.Patch(t, new HarmonyMethod(prefix));
+                _ok++;
+            }
+            catch (Exception e) { Refl.Warn("patch " + label + " failed: " + e.Message); _failed++; }
+        }
+
+        /// <summary>
+        /// Harmony needs a prefix whose parameter types match the target exactly; the port's
+        /// Vector3/IntVec3 live in assemblies this mod must not reference at compile time, so the
+        /// prefix is generic and is closed over the live signature here.
+        /// </summary>
+        private static void PatchClosed(string label, Func<MethodBase> target, string prefixName, Type owner)
+        {
+            try
+            {
+                MethodBase t = target();
+                if (t == null) { Refl.Warn("skip " + label + " (target missing)"); _failed++; return; }
+
+                MethodInfo open = null;
+                foreach (MethodInfo m in owner.GetMethods(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public))
+                    if (m.Name == prefixName && m.IsGenericMethodDefinition) { open = m; break; }
+                if (open == null) { Refl.Warn("skip " + label + " (generic prefix missing)"); _failed++; return; }
+
+                ParameterInfo[] ps = ((MethodInfo)t).GetParameters();
+                Type arg = ps.Length > 0 ? ps[0].ParameterType : ((MethodInfo)t).ReturnType;
+                MethodInfo closed = open.MakeGenericMethod(arg);
+                H.Patch(t, new HarmonyMethod(closed));
+                _ok++;
+                Refl.Info("patched " + label + " (closed over " + arg.Name + ")");
+            }
+            catch (Exception e) { Refl.Warn("patch " + label + " failed: " + e.Message); _failed++; }
+        }
+    }
+}
