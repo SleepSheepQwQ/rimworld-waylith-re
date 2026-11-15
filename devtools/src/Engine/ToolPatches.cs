@@ -42,6 +42,7 @@ namespace AgentDevTools
         private static IntVec3 _overrideCell;        // what UI.MouseCell() reports during clickAction
         private static object _overrideMapPos;       // boxed UnityEngine.Vector3 for UI.MouseMapPosition()
         private static bool _snapWarned;
+        private static bool _multiWarned;
 
         internal static object CurTool
         {
@@ -234,21 +235,26 @@ namespace AgentDevTools
             bool candEmpty = true;
             snapped = SnapGeometry.Resolve(tapPos, tapX, tapZ, out how, out candEmpty);
 
-            if (snapped == null && candEmpty)
-            {
-                Thing sel = SnapGeometry.SelectedThing();
-                if (sel != null)
-                {
-                    snapped = sel;
-                    how = "selected (no candidate)";
-                }
-            }
+            // An empty candidate list means the finger aimed at terrain. Never substitute the
+            // current selection here - that is what made "tap empty ground" hit a pawn/bed.
 
             if (snapped != null)
             {
-                targetCell = snapped.Position;
+                // keep the cell the finger is on when it lies inside the footprint; a 2x3 bench
+                // must not turn a tap on its right edge into its min corner
+                targetCell = tapCell;
+                try
+                {
+                    CellRect rect = GenAdj.OccupiedRect(snapped);
+                    if (!rect.Contains(tapCell)) targetCell = snapped.Position;
+                }
+                catch { targetCell = snapped.Position; }
+
                 object dp = SnapGeometry.DrawPosOf(snapped);
                 if (dp != null) targetPos = dp;
+
+                // single decision point, mirroring the unit-tested policy
+                if (!SnapPolicy.Accept(mode, !candEmpty, true)) { snapped = null; how = null; }
             }
         }
 
@@ -313,6 +319,7 @@ namespace AgentDevTools
 
             if (haveTap)
             {
+                TryClampCell(ref targetCell);
                 _overrideCell = targetCell;
                 _overrideMapPos = targetPos;
                 _overrideActive = true;
@@ -339,6 +346,38 @@ namespace AgentDevTools
             return true;
         }
 
+        /// <summary>Clamp to the current map: a tap at the screen edge can land outside it.</summary>
+        private static bool TryClampCell(ref IntVec3 c)
+        {
+            Map map = Find.CurrentMap;
+            if (map == null) return false;
+            if (c.x < 0) c.x = 0;
+            if (c.z < 0) c.z = 0;
+            if (c.x >= map.Size.x) c.x = map.Size.x - 1;
+            if (c.z >= map.Size.z) c.z = map.Size.z - 1;
+            return true;
+        }
+
+        private static PropertyInfo _pTouchCount;
+
+        /// <summary>Fingers on the screen right now, read reflectively (no UnityEngine dependency).</summary>
+        internal static int TouchCount()
+        {
+            try
+            {
+                if (_pTouchCount == null)
+                {
+                    Type input = Refl.T("UnityEngine.Input");
+                    if (input != null)
+                        _pTouchCount = input.GetProperty("touchCount",
+                            BindingFlags.Public | BindingFlags.Static);
+                }
+                object v = _pTouchCount == null ? null : _pTouchCount.GetValue(null);
+                return v is int i ? i : 1;
+            }
+            catch { return 1; }
+        }
+
         // ===================== Harmony patches =================================
 
         /// <summary>
@@ -346,6 +385,7 @@ namespace AgentDevTools
         /// click as a selection / drag-box start. Mirrors vanilla semantics, where
         /// DebugTool.Use() keeps DragBox.active false.
         /// </summary>
+        [HarmonyPriority(Priority.First)]
         internal static bool HandleMapClicks_Prefix(object __instance)
         {
             try
@@ -383,11 +423,26 @@ namespace AgentDevTools
         /// v7: with no tool armed, a double tap on a *building* is handled here as well, because
         /// PortUI's own double tap branch only ever matches ThingCategory.Item.
         /// </summary>
+        [HarmonyPriority(Priority.First)]
         internal static bool Tap_Prefix(object[] __args)
         {
             if (__args == null || __args.Length == 0) return true;
             try
             {
+                // A pinch must never fire a tool: with two fingers down the tap that the port
+                // reports is not a tap the player meant (this is the "stuck/misfire during zoom"
+                // class of bug every mobile port hits).
+                int fingers = TouchCount();
+                if (fingers > 1)
+                {
+                    if (!_multiWarned)
+                    {
+                        _multiWarned = true;
+                        Refl.Info("tap ignored: " + fingers + " fingers down (gesture, not a tap)");
+                    }
+                    return true;
+                }
+
                 if (CurTool == null) return true;   // no dev tool armed: nothing for this mod to do
 
                 bool longPress = false;
@@ -411,6 +466,7 @@ namespace AgentDevTools
         /// rewrites MouseCell for its designator preview; running at High priority keeps
         /// this override in front of it.
         /// </summary>
+        [HarmonyPriority(Priority.First)]
         internal static bool MouseCell_Prefix(ref IntVec3 __result)
         {
             if (!_overrideActive) return true;
@@ -430,6 +486,7 @@ namespace AgentDevTools
         /// so in IL the parameter really is 'ref UnityEngine.Vector3'. The value is handed back as a
         /// boxed Vector3 and unboxed here.
         /// </summary>
+        [HarmonyPriority(Priority.First)]
         internal static bool MouseMapPosition_Prefix<T>(ref T __result)
         {
             if (!_overrideActive) return true;
