@@ -1,0 +1,50 @@
+name: build-devtools
+
+# Builds the AgentDevTools mod (precise tapping for the developer tools).
+# Reference assemblies live in dlls/ and are never shipped.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'devtools/**'
+      - '.github/workflows/build-devtools.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Unit tests (snap policy)
+        run: dotnet test devtools/tests/SnapPolicy/SnapPolicy.csproj -c Release -v minimal
+
+      - name: Build AgentDevTools
+        run: dotnet build devtools/AgentDevTools.csproj -c Release -v minimal
+
+      - name: Package
+        run: |
+          DLL=$(find devtools/bin/Release -name AgentDevTools.dll | head -1)
+          test -n "$DLL" || { echo "AgentDevTools.dll not found"; exit 1; }
+          mkdir -p dist/AgentDevTools/Assemblies
+          cp devtools/mod/About/About.xml dist/AgentDevTools/About/
+          cp "$DLL" dist/AgentDevTools/Assemblies/
+          python3 - <<'PY'
+          import zipfile, os
+          with zipfile.ZipFile("AgentDevTools.zip","w",zipfile.ZIP_DEFLATED) as z:
+              for root,_,files in os.walk("dist/AgentDevTools"):
+                  for f in files:
+                      p=os.path.join(root,f)
+                      z.write(p, os.path.relpath(p,"dist").replace(os.sep,"/"))
+          print("zip bytes", os.path.getsize("AgentDevTools.zip"))
+          PY
+          stat -c '%n %s bytes' dist/AgentDevTools/Assemblies/AgentDevTools.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AgentDevTools
+          path: AgentDevTools.zip
