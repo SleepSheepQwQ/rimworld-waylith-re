@@ -36,7 +36,8 @@ namespace AgentDevTools
         internal const int Always = SnapPolicy.Always;
 
         /// <summary>Same folder as agenttouchfix.log / agenttouchfix.diag.</summary>
-        internal const string ModePath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.snap";
+        internal const string ModePath = "/data/data/com.ports1de.waylith/files/game/agentdevtools.snap";
+        internal const string LegacyModePath = "/data/data/com.ports1de.waylith/files/game/agenttouchfix.snap";
 
         private const float MaxDp = SnapPolicy.SpecDp;              // spec: 16 dp
         private const float MinRadiusPx = SnapPolicy.MinRadiusPx;    // floor when zoomed far out
@@ -62,12 +63,20 @@ namespace AgentDevTools
         }
 
         /// <summary>Read once from Bootstrap, before the first tap can happen.</summary>
-        internal static void ReadMode()
+        internal static void ReadMode() { ReadMode(Auto); }
+
+        /// <summary>
+        /// Read once from Bootstrap. [fallback] is the value from agentdevtools.mode, so the mod has a
+        /// single user-facing switch; agentdevtools.snap (and the old agenttouchfix.snap) override it.
+        /// </summary>
+        internal static void ReadMode(int fallback)
         {
             string raw = null;
+            string from = null;
             try
             {
-                if (File.Exists(ModePath)) raw = File.ReadAllText(ModePath);
+                if (File.Exists(ModePath)) { raw = File.ReadAllText(ModePath); from = ModePath; }
+                else if (File.Exists(LegacyModePath)) { raw = File.ReadAllText(LegacyModePath); from = LegacyModePath + " (legacy name)"; }
             }
             catch (Exception e)
             {
@@ -75,7 +84,7 @@ namespace AgentDevTools
             }
 
             string s = raw == null ? "" : raw.Trim().ToLowerInvariant();
-            int m = Auto;
+            int m = fallback;
             if (s.StartsWith("always")) m = Always;
             else if (s.StartsWith("off")) m = Off;
             else if (s.StartsWith("auto")) m = Auto;
@@ -83,7 +92,8 @@ namespace AgentDevTools
 
             _mode = m;
             Refl.Info("snap mode=" + ModeName(m)
-                + (raw == null ? " (no " + ModePath + ", default auto)" : " (" + ModePath + " = '" + Short(s) + "')"));
+                + (raw == null ? " (no " + ModePath + ", using agentdevtools.mode = " + ModeName(fallback) + ")"
+                               : " (" + from + " = '" + Short(s) + "')"));
         }
 
         // ================================================================ PortUI.Candidates
