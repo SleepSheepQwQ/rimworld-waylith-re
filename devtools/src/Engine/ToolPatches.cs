@@ -388,11 +388,7 @@ namespace AgentDevTools
             if (__args == null || __args.Length == 0) return true;
             try
             {
-                if (CurTool == null)
-                {
-                    // no dev tool armed: the only case we take over is a building double tap
-                    return !DoubleTapSelect.TryConsume(__args);
-                }
+                if (CurTool == null) return true;   // no dev tool armed: nothing for this mod to do
 
                 bool longPress = false;
                 if (__args.Length > 1)
