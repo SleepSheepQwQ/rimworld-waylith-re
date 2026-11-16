@@ -164,6 +164,28 @@ namespace AgentDevTools
             return null;
         }
 
+        /// <summary>Every overload's signature, for diagnosing a strict-match miss.</summary>
+        internal static string Overloads(Type t, string name)
+        {
+            if (t == null) return "(type not found)";
+            var sb = new System.Text.StringBuilder();
+            foreach (MethodInfo m in t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                                  BindingFlags.Instance | BindingFlags.Static))
+            {
+                if (m.Name != name) continue;
+                if (sb.Length > 0) sb.Append(" | ");
+                sb.Append(m.Name).Append('(');
+                ParameterInfo[] ps = m.GetParameters();
+                for (int i = 0; i < ps.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(ps[i].ParameterType.Name);
+                }
+                sb.Append(')');
+            }
+            return sb.Length == 0 ? "(no overload named " + name + ")" : sb.ToString();
+        }
+
         internal static FieldInfo F(Type t, string name)
         {
             if (t == null) return null;
