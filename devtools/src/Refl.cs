@@ -55,7 +55,7 @@ namespace AgentDevTools
                     _w.WriteLine(line);
                     _w.Flush();
                     _written += line.Length + 2;
-                    if (_written > 1024L * 1024L) { Close(); }
+                    if (_written > 1024L * 1024L) { Rotate(); }
                 }
             }
             catch { }
@@ -72,6 +72,23 @@ namespace AgentDevTools
                 _written = fs.Length;
             }
             catch { _w = null; }
+        }
+
+        /// <summary>Keep exactly one previous log; the current file never grows without bound.</summary>
+        private static void Rotate()
+        {
+            Close();
+            try
+            {
+                if (File.Exists(LogPath))
+                {
+                    string prev = LogPath + ".1";
+                    if (File.Exists(prev)) File.Delete(prev);
+                    File.Move(LogPath, prev);
+                }
+            }
+            catch { }
+            _written = 0;
         }
 
         private static void Close()
@@ -120,6 +137,29 @@ namespace AgentDevTools
                 if (m.Name != name) continue;
                 if (argc >= 0 && m.GetParameters().Length != argc) continue;
                 return m;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Strict lookup: name + parameter type names (short names, e.g. "Vector3", "Boolean").
+        /// Used so a new overload in a future port version cannot be patched by accident.
+        /// </summary>
+        internal static MethodInfo M(Type t, string name, string[] paramTypeNames)
+        {
+            if (t == null) return null;
+            foreach (MethodInfo m in t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                                  BindingFlags.Instance | BindingFlags.Static))
+            {
+                if (m.Name != name) continue;
+                ParameterInfo[] ps = m.GetParameters();
+                if (ps.Length != paramTypeNames.Length) continue;
+                bool okAll = true;
+                for (int i = 0; i < ps.Length; i++)
+                {
+                    if (ps[i].ParameterType.Name != paramTypeNames[i]) { okAll = false; break; }
+                }
+                if (okAll) return m;
             }
             return null;
         }
