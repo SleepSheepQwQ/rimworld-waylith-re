@@ -484,7 +484,10 @@ namespace AgentDevTools
                     _tapShapeLogged = true;
                     Refl.Info("tap args: argc=" + __args.Length + " flag1=" + flag1 + " flag2=" + flag2);
                 }
-                bool longPress = flag1 || flag2;
+                // 0.0.22: Tap(Vector3, Boolean, Boolean). The first flag is the long-press
+                // ("cancel the armed tool") signal; OR-ing both was wrong - the second flag is set
+                // on ordinary taps too, which disarmed the tool the moment it was picked.
+                bool longPress = flag1;
                 bool consumed = Fire(__args[0], longPress);
                 return !consumed;
             }
