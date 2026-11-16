@@ -71,4 +71,36 @@ namespace AgentDevTools.Tests
             Assert.Equal(expected, SnapPolicy.Name(mode));
         }
     }
+
+        // ---- tool classification -------------------------------------------------------
+
+        [Theory]
+        [InlineData("Kill", true)]
+        [InlineData("Destroy", true)]
+        [InlineData("Damage", true)]
+        [InlineData("Apply damage", true)]
+        [InlineData("Set terrain", false)]
+        [InlineData("Paint floor", false)]
+        [InlineData("Build roof", false)]
+        [InlineData("Mine", false)]
+        [InlineData("Designate", false)]
+        [InlineData("Place blueprints", false)]
+        [InlineData("Weather", false)]
+        [InlineData("", true)]
+        [InlineData(null, true)]
+        public void ToolWantsThing(string label, bool expected)
+        {
+            Assert.Equal(expected, SnapPolicy.ToolWantsThing(label));
+        }
+
+        [Fact]
+        public void ACellToolIsNeverSnapped()
+        {
+            // even with candidates present and the finger inside the footprint
+            Assert.False(SnapPolicy.Accept(SnapPolicy.Always, true, true, toolWantsThing: false));
+            Assert.False(SnapPolicy.Accept(SnapPolicy.Auto, true, true, toolWantsThing: false));
+            // an object tool keeps the normal rules
+            Assert.True(SnapPolicy.Accept(SnapPolicy.Auto, true, true, toolWantsThing: true));
+            Assert.False(SnapPolicy.Accept(SnapPolicy.Auto, true, false, toolWantsThing: true));
+        }
 }
