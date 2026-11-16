@@ -38,7 +38,7 @@ namespace AgentDevTools
                 H = new HarmonyLib.Harmony(HarmonyId);
 
                 int mode = ReadMode();
-                Refl.Info("BUILD 1.1.0 / AgentDevTools " + typeof(Bootstrap).Assembly.GetName().Version
+                Refl.Info("BUILD 1.2.0 / AgentDevTools " + typeof(Bootstrap).Assembly.GetName().Version
                           + " bootstrapping, mode=" + SnapPolicy.Name(mode));
 
                 if (mode == SnapPolicy.Off)
@@ -51,23 +51,30 @@ namespace AgentDevTools
                 PickMode.ReadMode();
 
                 Patch("RimWorld.Selector.HandleMapClicks",
-                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks"),
+                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "RimWorld.Selector"), "HandleMapClicks",
+                                   new string[0]),
                       MI(typeof(ToolPatches), "HandleMapClicks_Prefix"));
 
                 Patch("PortUI.MobileSelectionController.Tap",
-                      () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Tap"),
+                      // strict: (Vector3, bool). If a future port changes the signature the patch is
+                      // skipped and reported, instead of binding to an overload nobody calls.
+                      () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Tap",
+                                   new[] { "Vector3", "Boolean" }),
                       MI(typeof(ToolPatches), "Tap_Prefix"));
 
                 Patch("Verse.UI.MouseCell",
-                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseCell"),
+                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseCell",
+                                   new string[0]),
                       MI(typeof(ToolPatches), "MouseCell_Prefix"));
 
                 PatchClosed("Verse.UI.MouseMapPosition",
-                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseMapPosition"),
+                      () => Refl.M(Refl.TPrefer("Assembly-CSharp", "Verse.UI"), "MouseMapPosition",
+                                   new string[0]),
                       "MouseMapPosition_Prefix", typeof(ToolPatches));
 
                 PatchClosed("PortUI.Candidates",
-                      () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Candidates"),
+                      () => Refl.M(Refl.TPrefer("PortUI", "PortUI.MobileSelectionController"), "Candidates",
+                                   new[] { "Vector3" }),
                       "Candidates_Prefix", typeof(PickMode));
 
                 Refl.Info("AgentDevTools " + (_failed == 0 ? "ready" : "degraded")
