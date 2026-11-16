@@ -70,7 +70,6 @@ namespace AgentDevTools.Tests
         {
             Assert.Equal(expected, SnapPolicy.Name(mode));
         }
-    }
 
         // ---- tool classification -------------------------------------------------------
 
