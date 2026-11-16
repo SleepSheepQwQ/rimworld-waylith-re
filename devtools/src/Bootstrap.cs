@@ -103,12 +103,25 @@ namespace AgentDevTools
         {
             Type t = Refl.TPrefer("PortUI", "PortUI.MobileSelectionController");
             if (t == null) return null;
-            MethodInfo strict = Refl.M(t, "Tap", new[] { "Vector3", "Boolean" });
+            // 0.0.22: Tap(Vector3, Boolean, Boolean)
+            MethodInfo strict = Refl.M(t, "Tap", new[] { "Vector3", "Boolean", "Boolean" });
+            if (strict == null) strict = Refl.M(t, "Tap", new[] { "Vector3", "Boolean" });
             if (strict != null) return strict;
-            Refl.Warn("Tap has no (Vector3, bool) overload; overloads = " + Refl.Overloads(t, "Tap"));
-            MethodInfo loose = Refl.M(t, "Tap", 2);
-            if (loose != null) Refl.Warn("falling back to " + Signature(loose));
-            return loose;
+
+            Refl.Warn("Tap has no (Vector3, bool[, bool]) overload; overloads = " + Refl.Overloads(t, "Tap"));
+            // last resort: any Tap whose first parameter is the position
+            foreach (MethodInfo m in t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                                  BindingFlags.Instance | BindingFlags.Static))
+            {
+                if (m.Name != "Tap") continue;
+                ParameterInfo[] ps = m.GetParameters();
+                if (ps.Length >= 1 && ps[0].ParameterType.Name == "Vector3")
+                {
+                    Refl.Warn("falling back to " + Signature(m));
+                    return m;
+                }
+            }
+            return null;
         }
 
         private static string Signature(MethodBase m)
