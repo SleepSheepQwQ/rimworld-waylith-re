@@ -44,6 +44,8 @@ namespace AgentDevTools
         private static object _overrideMapPos;       // boxed UnityEngine.Vector3 for UI.MouseMapPosition()
         private static bool _snapWarned;
         private static bool _multiWarned;
+        private static long _lastFireMs;
+        private static FieldInfo _fToolLabel;
 
         internal static object CurTool
         {
@@ -255,7 +257,9 @@ namespace AgentDevTools
                 if (dp != null) targetPos = dp;
 
                 // single decision point, mirroring the unit-tested policy
-                if (!SnapPolicy.Accept(mode, !candEmpty, true)) { snapped = null; how = null; }
+                string label = ToolLabel(CurTool);
+                if (!SnapPolicy.Accept(mode, !candEmpty, true, SnapPolicy.ToolWantsThing(label)))
+                { snapped = null; how = null; }
             }
         }
 
@@ -343,8 +347,22 @@ namespace AgentDevTools
                 _overrideActive = false;
                 _overrideMapPos = null;
                 _lastFireClock = Now();
+                _lastFireMs = Environment.TickCount;
             }
             return true;
+        }
+
+        /// <summary>Label of the armed tool, used to tell cell tools from object tools.</summary>
+        private static string ToolLabel(object tool)
+        {
+            if (tool == null) return null;
+            try
+            {
+                if (_fToolLabel == null || _fToolLabel.DeclaringType != tool.GetType())
+                    _fToolLabel = Refl.F(tool.GetType(), "label");
+                return _fToolLabel == null ? null : _fToolLabel.GetValue(tool) as string;
+            }
+            catch { return null; }
         }
 
         /// <summary>Clamp to the current map: a tap at the screen edge can land outside it.</summary>
@@ -445,6 +463,15 @@ namespace AgentDevTools
                 }
 
                 if (CurTool == null) return true;   // no dev tool armed: nothing for this mod to do
+
+                // one gesture, one action: the port may deliver both a touch tap and a synthetic
+                // mouse click for the same press, and fast double taps must not double-fire a tool
+                long nowMs = Environment.TickCount;
+                if (nowMs - _lastFireMs >= 0 && nowMs - _lastFireMs < 150)
+                {
+                    Refl.Info("tap debounced (" + (nowMs - _lastFireMs) + " ms after the previous action)");
+                    return true;
+                }
 
                 bool longPress = false;
                 if (__args.Length > 1)
