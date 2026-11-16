@@ -1,0 +1,16 @@
+name: ui-coords
+on: [push, workflow_dispatch]
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo -S -p '' apt-get update -qq
+          sudo -S -p '' apt-get install -y -qq tesseract-ocr tesseract-ocr-chi-sim python3-pil
+      - name: analyze
+        run: |
+          python3 ui/analyze.py ui/shot-dialog.png
+          echo "==== menu ===="
+          python3 ui/analyze.py ui/shot-menu.png
