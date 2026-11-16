@@ -103,3 +103,4 @@ namespace AgentDevTools.Tests
             Assert.False(SnapPolicy.Accept(SnapPolicy.Auto, true, false, toolWantsThing: true));
         }
 }
+}
