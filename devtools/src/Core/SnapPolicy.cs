@@ -48,6 +48,37 @@ namespace AgentDevTools
             return r;
         }
 
+
+        // ---- tool classification ---------------------------------------------------------
+        /// <summary>
+        /// Tools that act on a CELL, not on an object. Snapping them to a thing would move the
+        /// target away from the finger (the classic "paint terrain, but it painted the bed" bug).
+        /// Unknown labels keep the old behaviour (assume a thing is wanted) so a new tool cannot
+        /// silently lose snapping.
+        /// </summary>
+        private static readonly string[] CellToolKeywords =
+        {
+            "terrain", "floor", "roof", "zone", "designat", "blueprint", "mine", "paint",
+            "water", "weather", "light", "temperature", "snow", "rain", "fog", "pollution",
+            "moisture", "river", "rock", "smooth"
+        };
+
+        internal static bool ToolWantsThing(string label)
+        {
+            if (string.IsNullOrEmpty(label)) return true;
+            string l = label.ToLowerInvariant();
+            for (int i = 0; i < CellToolKeywords.Length; i++)
+                if (l.Contains(CellToolKeywords[i])) return false;
+            return true;
+        }
+
+        /// <summary>Full decision: a cell tool is never snapped, whatever the candidate list says.</summary>
+        internal static bool Accept(int mode, bool candidateListHadEntries, bool hitWithinRadius, bool toolWantsThing)
+        {
+            if (!toolWantsThing) return false;
+            return Accept(mode, candidateListHadEntries, hitWithinRadius);
+        }
+
         /// <summary>
         /// The one rule this mod exists for: a hit-test result may only be used when the tap was aimed
         /// at something. An empty candidate list means "PortUI sees nothing here" - that is a
