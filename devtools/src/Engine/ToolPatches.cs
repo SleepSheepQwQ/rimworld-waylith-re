@@ -45,6 +45,7 @@ namespace AgentDevTools
         private static bool _snapWarned;
         private static bool _multiWarned;
         private static long _lastFireMs;
+        private static bool _tapShapeLogged;
         private static FieldInfo _fToolLabel;
 
         internal static object CurTool
@@ -473,12 +474,17 @@ namespace AgentDevTools
                     return true;
                 }
 
-                bool longPress = false;
-                if (__args.Length > 1)
+                // The port's Tap is (Vector3, bool, bool); the exact meaning of the two flags is
+                // version specific, so treat "any flag set" as the cancel gesture (long press or a
+                // double tap both mean "stop, do not act") and log the raw flags once.
+                bool flag1 = __args.Length > 1 && __args[1] is bool && (bool)__args[1];
+                bool flag2 = __args.Length > 2 && __args[2] is bool && (bool)__args[2];
+                if (!_tapShapeLogged)
                 {
-                    object o = __args[1];
-                    if (o is bool) longPress = (bool)o;
+                    _tapShapeLogged = true;
+                    Refl.Info("tap args: argc=" + __args.Length + " flag1=" + flag1 + " flag2=" + flag2);
                 }
+                bool longPress = flag1 || flag2;
                 bool consumed = Fire(__args[0], longPress);
                 return !consumed;
             }
