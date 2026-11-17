@@ -92,12 +92,17 @@ namespace Host
         {
             try
             {
-                var ps = md.GetParameters();
-                if (index < ps.Count)
+                int n = 0;
+                foreach (var ph in md.GetParameters())
                 {
-                    var p = Md.GetParameter(ps[index]);
-                    string n = Md.GetString(p.Name);
-                    if (!string.IsNullOrEmpty(n)) return n;
+                    if (n == index)
+                    {
+                        var p = Md.GetParameter(ph);
+                        string nm = Md.GetString(p.Name);
+                        if (!string.IsNullOrEmpty(nm)) return nm;
+                        break;
+                    }
+                    n++;
                 }
             }
             catch { }
