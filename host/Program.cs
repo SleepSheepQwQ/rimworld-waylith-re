@@ -34,6 +34,8 @@ static class Program
         var way = Load("Waylith.dll");
         var uni = Load("UnityStubs.dll");
 
+        IlScan.Run(Find("Assembly-CSharp.dll"), Find("UnityStubs.dll"));
+
         Console.WriteLine("== Graphic.DrawMeshInt ==");
         Dump(acs.GetType("Verse.Graphic"), "DrawMeshInt");
         Console.WriteLine("== Graphic.DrawWorker ==");
