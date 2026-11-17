@@ -11,13 +11,14 @@ namespace Host
         static int Main(string[] args)
         {
             string dir = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
+            bool forceFail = args.Contains("--force-fail");
             if (string.IsNullOrEmpty(dir)) dir = FindDllsDir();
             if (dir == null)
             {
                 Console.WriteLine("[FATAL] could not locate dlls/Assembly-CSharp.dll; pass the dll directory as the first argument");
                 return 2;
             }
-            return Gate.RunAll(Path.GetFullPath(dir));
+            return Gate.RunAll(Path.GetFullPath(dir), forceFail);
         }
 
         static string FindDllsDir()

@@ -1,5 +1,12 @@
 name: host
-on: [push, workflow_dispatch]
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      demo_fail:
+        description: 'flip assert 1 to prove the exit code turns the job red'
+        type: boolean
+        default: false
 jobs:
   static-assertions:
     runs-on: ubuntu-latest
@@ -13,14 +20,16 @@ jobs:
       - name: run the static assertions (exit code is the result)
         run: |
           set -o pipefail
-          dotnet run --project host/Host.csproj -c Release --no-build -- "$PWD/dlls" | tee host-assertions.log
+          extra=""
+          if [ "${{ inputs.demo_fail }}" = "true" ]; then extra="--force-fail"; fi
+          dotnet run --project host/Host.csproj -c Release --no-build -- "$PWD/dlls" $extra | tee host-assertions.log
       - name: publish the conclusions to the step summary
         if: always()
         run: |
           {
             echo '### host static assertions'
             echo '```'
-            grep -E '^\[SUMMARY\]|^RESULT:|^=== |\[PASS\]|\[FAIL\]|\[INFO\]|\[FINDING\]|\[HIT\]|\[SELFTEST\]|\[OK\]|\[BROKEN\]' host-assertions.log || true
+            grep -E '^\[SUMMARY\]|^RESULT:|^\[DEMO\]|^=== |\[PASS\]|\[FAIL\]|\[INFO\]|\[FINDING\]|\[HIT\]|\[REL\]|\[SELFTEST\]|\[OK\]|\[BROKEN\]' host-assertions.log || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: upload the full log

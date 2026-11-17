@@ -9,6 +9,9 @@ dotnet run --project host/Host.csproj -c Release -- dlls    # explicit dir
 echo $?                                                     # 0 pass / 1 assertion failed / 2 harness could not run
 ```
 
+`--force-fail` flips assert 1 to `FAIL` on purpose; the workflow's `demo_fail` dispatch input uses it to
+show that the exit code (not the log text) is what turns the job red.
+
 ## The assertions
 
 | # | kind | what it checks |

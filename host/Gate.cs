@@ -24,7 +24,7 @@ namespace Host
         static List<Module> Mods;
         static Dictionary<long, string> EventTypeNames = new Dictionary<long, string>();
 
-        public static int RunAll(string dir)
+        public static int RunAll(string dir, bool forceFail)
         {
             if (!Directory.Exists(dir))
             {
@@ -48,6 +48,14 @@ namespace Host
             fail += CheckDrawMeshInt(out int drawCalls);
             int guards = ReportGuiChain();
             fail += CheckEnqueueCallers(out int callers, out int sites, out int related);
+
+            if (forceFail)
+            {
+                Console.WriteLine();
+                Console.WriteLine("[DEMO] --force-fail: flipping assert 1 to FAIL to prove the exit code is the result");
+                LastDrawOk = false;
+                fail++;
+            }
 
             Console.WriteLine();
             Console.WriteLine("[SUMMARY] assert1=" + Status(LastDrawOk)
