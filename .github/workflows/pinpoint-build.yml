@@ -1,0 +1,42 @@
+name: pinpoint-build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reference assemblies (this repo already carries them)
+        uses: actions/checkout@v4
+
+      - name: Source (public devtools repo)
+        uses: actions/checkout@v4
+        with:
+          repository: SleepSheepQwQ/rimworld-waylith-devtools
+          path: dt
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build dt/AgentDevTools.csproj -c Release -v minimal
+
+      - name: Package (flat layout)
+        run: |
+          echo "--- produced ---"
+          find dt/bin/Release -name '*.dll' -printf '%p %s bytes\n' | sort
+          DLL=$(find dt/bin/Release -name 'Pinpoint.dll' | head -1)
+          test -n "$DLL" || { echo "no Pinpoint.dll"; exit 1; }
+          mkdir -p dist/Pinpoint/About dist/Pinpoint/Assemblies
+          cp dt/mod/About/About.xml dist/Pinpoint/About/
+          cp "$DLL" dist/Pinpoint/Assemblies/
+          (cd dist/Pinpoint && zip -qr ../../Pinpoint.zip .)
+          unzip -l Pinpoint.zip
+          md5sum Pinpoint.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pinpoint
+          path: Pinpoint.zip
