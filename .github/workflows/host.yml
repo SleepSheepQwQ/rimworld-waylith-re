@@ -1,12 +1,31 @@
 name: host
 on: [push, workflow_dispatch]
 jobs:
-  introspect:
+  static-assertions:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: introspect the real assemblies
-        run: dotnet run --project host/Host.csproj -c Release
+      - name: build the metadata harness
+        run: dotnet build host/Host.csproj -c Release
+      - name: run the static assertions (exit code is the result)
+        run: |
+          set -o pipefail
+          dotnet run --project host/Host.csproj -c Release --no-build -- "$PWD/dlls" | tee host-assertions.log
+      - name: publish the conclusions to the step summary
+        if: always()
+        run: |
+          {
+            echo '### host static assertions'
+            echo '```'
+            grep -E '^\[SUMMARY\]|^RESULT:|^=== |\[PASS\]|\[FAIL\]|\[INFO\]|\[FINDING\]|\[HIT\]|\[SELFTEST\]|\[OK\]|\[BROKEN\]' host-assertions.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: upload the full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-assertions-log
+          path: host-assertions.log

@@ -1,61 +1,38 @@
 using System;
+using System.IO;
 using System.Linq;
-using System.Reflection;
 
-static class Program
+namespace Host
 {
-    static void Dump(Type t, string name)
+    // Entry point for the static assertion suite. Runs entirely on metadata from dlls/:
+    // no game runtime, no GPU, no Unity. Exit code is the test result (see Gate.RunAll).
+    static class Program
     {
-        if (t == null) { Console.WriteLine($"MISSING type {name}"); return; }
-        Console.WriteLine($"type {t.FullName}  ({t.Assembly.GetName().Name})");
-        foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                            .Where(m => m.Name == name))
+        static int Main(string[] args)
         {
-            var ps = string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name));
-            Console.WriteLine($"   {(m.IsStatic ? "static" : "inst")} {(m.IsVirtual ? "virtual" : "")} {m.ReturnType.Name} {m.Name}({ps})");
+            string dir = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
+            if (string.IsNullOrEmpty(dir)) dir = FindDllsDir();
+            if (dir == null)
+            {
+                Console.WriteLine("[FATAL] could not locate dlls/Assembly-CSharp.dll; pass the dll directory as the first argument");
+                return 2;
+            }
+            return Gate.RunAll(Path.GetFullPath(dir));
         }
-    }
 
-    static string Find(string name)
-    {
-        foreach (var root in new[] { AppContext.BaseDirectory, "dlls", "../dlls", "../../dlls" })
+        static string FindDllsDir()
         {
-            var p = System.IO.Path.Combine(root, name);
-            if (System.IO.File.Exists(p)) return System.IO.Path.GetFullPath(p);
+            foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+            {
+                string d = start;
+                for (int i = 0; i < 6 && !string.IsNullOrEmpty(d); i++)
+                {
+                    string cand = Path.Combine(d, "dlls");
+                    if (File.Exists(Path.Combine(cand, "Assembly-CSharp.dll"))) return cand;
+                    d = Path.GetDirectoryName(d);
+                }
+            }
+            return null;
         }
-        throw new System.IO.FileNotFoundException("not found: " + name + " (cwd=" + System.IO.Directory.GetCurrentDirectory() + ")");
-    }
-
-    static Assembly Load(string name) => Assembly.LoadFrom(Find(name));
-
-    static void Main()
-    {
-        var acs = Load("Assembly-CSharp.dll");
-        var way = Load("Waylith.dll");
-        var uni = Load("UnityStubs.dll");
-
-        IlScan.Run(Find("Assembly-CSharp.dll"), Find("UnityStubs.dll"));
-
-        Console.WriteLine("== Graphic.DrawMeshInt ==");
-        Dump(acs.GetType("Verse.Graphic"), "DrawMeshInt");
-        Console.WriteLine("== Graphic.DrawWorker ==");
-        Dump(acs.GetType("Verse.Graphic"), "DrawWorker");
-        Console.WriteLine("== GenDraw.DrawMeshNowOrLater ==");
-        Dump(acs.GetType("Verse.GenDraw"), "DrawMeshNowOrLater");
-        Console.WriteLine("== Graphics.DrawMesh (stub) ==");
-        Dump(uni.GetType("UnityEngine.Graphics"), "DrawMesh");
-        Console.WriteLine("== Graphics.DrawMeshNow (stub) ==");
-        Dump(uni.GetType("UnityEngine.Graphics"), "DrawMeshNow");
-        Console.WriteLine("== PawnRenderUtility ==");
-        Dump(acs.GetType("Verse.PawnRenderUtility"), "DrawCarriedThing");
-        Dump(acs.GetType("Verse.PawnRenderUtility"), "DrawEquipmentAndApparelExtras");
-        Console.WriteLine("== ThingIcon overloads ==");
-        var w = acs.GetType("Verse.Widgets");
-        foreach (var m in w.GetMethods(BindingFlags.Public | BindingFlags.Static).Where(m => m.Name == "ThingIcon"))
-            Console.WriteLine("   ThingIcon(" + string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name)) + ")");
-        Console.WriteLine("== GpuTextureService cache entry points ==");
-        var svc = way.GetType("Waylith.Rendering.GpuTextureService");
-        foreach (var n in new[] { "TryOpenTextureCache", "HasValidTextureCache", "WriteTextureCache" })
-            Dump(svc, n);
     }
 }
