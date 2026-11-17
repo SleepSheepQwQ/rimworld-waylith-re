@@ -66,9 +66,9 @@ static class IlScan
                         i += 4;
                     }
                 }
-                Console.WriteLine($"{typeName}.{methodName}  il={il.Length}B  calls: " +
-                                  string.Join(", ", calls.Distinct().Take(12)));
-                return;
+                var ps = string.Join(",", md.GetParameters().Select(h => R.GetString(R.GetParameter(h).Name)));
+                Console.WriteLine($"{typeName}.{methodName}({ps})  il={il.Length}B  calls: " +
+                                  string.Join(", ", calls.Distinct().Take(14)));
             }
         }
         Console.WriteLine($"MISSING {typeName}.{methodName}");
