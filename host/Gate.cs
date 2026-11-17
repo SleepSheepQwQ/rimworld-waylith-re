@@ -47,13 +47,14 @@ namespace Host
             fail += selfBroken;
             fail += CheckDrawMeshInt(out int drawCalls);
             int guards = ReportGuiChain();
-            fail += CheckEnqueueCallers(out int callers, out int sites);
+            fail += CheckEnqueueCallers(out int callers, out int sites, out int related);
 
             Console.WriteLine();
             Console.WriteLine("[SUMMARY] assert1=" + Status(LastDrawOk)
                               + " (draw calls=" + drawCalls + ")"
-                              + " assert2=INFO(guards=" + guards + ")"
-                              + " assert3=" + Status(LastEnqueueOk) + "(callers=" + callers + ", sites=" + sites + ")"
+                              + " assert2=INFO(phase-guards=" + guards + ")"
+                              + " assert3=" + Status(LastEnqueueOk) + "(callers=" + callers + ", sites=" + sites
+                              + ", related-instanced=" + related + ")"
                               + " selftest=" + (selfBroken == 0 ? "PASS" : "BROKEN"));
             Console.WriteLine(fail == 0 ? "RESULT: PASS" : "RESULT: FAIL (" + fail + " failing assertion(s))");
             return fail == 0 ? 0 : 1;
@@ -208,9 +209,12 @@ namespace Host
             string sig = m.MethodSignature(h);
             string pad = new string(' ', depth * 3) + "[" + m.Name + " d" + depth + "] ";
             if (depth > 3) return;
-            if (!seen.Add(sig))
+            // Overloads can share one body (same RVA); walk each body once.
+            var mdh = m.Md.GetMethodDefinition(h);
+            string key = m.Name + "#" + (mdh.RelativeVirtualAddress != 0 ? mdh.RelativeVirtualAddress.ToString() : sig);
+            if (!seen.Add(key))
             {
-                Console.WriteLine(pad + sig + "  (already walked)");
+                Console.WriteLine(pad + sig + "  (same body as an already walked overload)");
                 return;
             }
 
@@ -276,51 +280,78 @@ namespace Host
             }
         }
 
-        // Flags the "is the GUI in a drawing phase?" idiom: a read of Event.current/.type that is
-        // followed by an integer constant (a comparison) and/or a branch.
+        // Flags the "is the GUI in a drawing phase?" idiom: a read of Event.current.type that is
+        // compared against an EventType constant, plus the call it guards.
         static void DetectGuard(Module m, List<Insn> ins, int at, string target, List<string> guards)
         {
             if (target.IndexOf("CheckOnGUI", StringComparison.Ordinal) >= 0)
-                guards.Add("calls " + target + " (Unity's phase check helper)");
-            if (target.IndexOf("GUIUtility", StringComparison.Ordinal) >= 0 && target.IndexOf("phase", StringComparison.OrdinalIgnoreCase) >= 0)
-                guards.Add("calls " + target);
-
-            bool eventPhase = target.IndexOf("Event", StringComparison.Ordinal) >= 0
-                              && (target.EndsWith("::get_type", StringComparison.Ordinal)
-                                  || target.EndsWith("::get_current", StringComparison.Ordinal)
-                                  || target.EndsWith("::get_typeForced", StringComparison.Ordinal));
-            if (!eventPhase) return;
-
-            long? cst = null;
-            string branch = null;
-            string compare = null;
-            int until = Math.Min(ins.Count, at + 10);
-            for (int j = at + 1; j < until; j++)
             {
+                guards.Add("calls " + target + " (Unity's GUI phase check helper)");
+                return;
+            }
+
+            bool isType = target.EndsWith("::get_type", StringComparison.Ordinal);
+            bool isCurrent = target.EndsWith("::get_current", StringComparison.Ordinal);
+            if (!(isType || isCurrent) || target.IndexOf("Event", StringComparison.Ordinal) < 0) return;
+
+            // Walk only the straight-line code that follows the read, stopping at the next call:
+            // that keeps the constant we report attached to THIS read.
+            long? cst = null;
+            string compare = null;
+            string branch = null;
+            int branchAt = -1;
+            int stop = Math.Min(ins.Count, at + 8);
+            for (int j = at + 1; j < stop; j++)
+            {
+                if (Il.IsCall(ins[j])) { stop = j; break; }
                 long v;
                 if (Il.TryLdcI4(ins[j], out v) && cst == null) cst = v;
                 if (Il.IsCompare(ins[j]) && compare == null) compare = ins[j].OpName;
-                if (Il.IsBranch(ins[j]) && branch == null) branch = ins[j].OpName + " @IL_" + ins[j].Offset.ToString("X4");
+                if (Il.IsBranch(ins[j]) && branch == null)
+                {
+                    branch = ins[j].OpName + " @IL_" + ins[j].Offset.ToString("X4");
+                    branchAt = j;
+                }
             }
-            string enumName;
+
+            if (isCurrent && !isType)
+            {
+                guards.Add("Event.current null check" + (branch != null ? " (" + branch + ")" : ""));
+                return;
+            }
+
             string cstText = cst.HasValue ? cst.Value.ToString() : "?";
+            string enumName;
             if (cst.HasValue && EventTypeNames.TryGetValue(cst.Value, out enumName))
                 cstText += " (EventType." + enumName + ")";
 
-            guards.Add(target + " read"
-                       + (cst.HasValue ? ", compared with " + cstText : "")
-                       + (compare != null ? " via " + compare : "")
-                       + (branch != null ? ", branch " + branch : ""));
+            // What the guarded branch leads to (the call right after the branch).
+            string guarded = null;
+            if (branchAt >= 0)
+            {
+                for (int j = branchAt + 1; j < ins.Count; j++)
+                {
+                    if (!Il.IsCall(ins[j])) continue;
+                    string t2 = Describe(m, ins[j].Token);
+                    if (t2 != null) { guarded = t2; break; }
+                }
+            }
+
+            guards.Add("Event.current.type compared with " + cstText
+                       + (compare != null ? " (" + compare + ")" : "")
+                       + (branch != null ? ", " + branch : "")
+                       + (guarded != null ? " -> guarded call: " + guarded : ""));
         }
 
         // ---------------------------------------------------------------- assert 3
 
-        static int CheckEnqueueCallers(out int callers, out int sites)
+        static int CheckEnqueueCallers(out int callers, out int sites, out int related)
         {
             Console.WriteLine();
             Console.WriteLine("=== ASSERT 3 (hard, list must be non-empty): methods referencing " + EnqueueOwner + "Enqueue ===");
             callers = 0;
             sites = 0;
+            related = 0;
             int bad = 0;
 
             var overloads = new List<string>();
@@ -337,8 +368,8 @@ namespace Host
             Console.WriteLine("  declared overloads (" + overloads.Count + "):");
             foreach (var o in overloads) Console.WriteLine("    * " + o);
 
-            var hits = new List<string>();
             var perCaller = new Dictionary<string, List<string>>();
+            var perCallerRel = new Dictionary<string, List<string>>();
             foreach (var m in Mods)
             {
                 foreach (var th in m.Md.TypeDefinitions)
@@ -355,26 +386,32 @@ namespace Host
                             if (!Il.IsCall(i)) continue;
                             string t = Describe(m, i.Token);
                             if (t == null || !t.StartsWith(EnqueueOwner + "Enqueue", StringComparison.Ordinal)) continue;
-                            sites++;
+                            string member = t.Substring(EnqueueOwner.Length);
+                            bool exact = member == "Enqueue";
+                            var target = exact ? perCaller : perCallerRel;
+                            if (exact) sites++;
                             string key = m.Name + " | " + typeName + "::" + m.Md.GetString(m.Md.GetMethodDefinition(h).Name);
-                            if (!perCaller.ContainsKey(key))
-                            {
-                                perCaller[key] = new List<string>();
-                                callers++;
-                            }
-                            perCaller[key].Add(t);
+                            if (!target.ContainsKey(key)) target[key] = new List<string>();
+                            target[key].Add(t);
                         }
                     }
                 }
             }
 
-            Console.WriteLine("  call sites: " + sites + "   distinct callers: " + callers);
+            callers = perCaller.Count;
+            related = perCallerRel.Count;
+            Console.WriteLine("  call sites to Enqueue: " + sites + "   distinct callers: " + callers);
             foreach (var kv in perCaller.OrderBy(k => k.Key, StringComparer.Ordinal))
-            {
                 Console.WriteLine("  [HIT] " + kv.Key + "   -> " + string.Join(", ", kv.Value.Distinct()));
-                hits.Add(kv.Key);
+
+            if (perCallerRel.Count > 0)
+            {
+                Console.WriteLine("  related instanced/indirect Enqueue* paths (" + related + " callers, listed for context, not part of the assertion):");
+                foreach (var kv in perCallerRel.OrderBy(k => k.Key, StringComparer.Ordinal))
+                    Console.WriteLine("  [REL] " + kv.Key + "   -> " + string.Join(", ", kv.Value.Distinct()));
             }
-            if (hits.Count == 0)
+
+            if (callers == 0)
             {
                 Console.WriteLine("  [FAIL] nothing calls " + EnqueueOwner + "Enqueue any more (the queue would be dead code)");
                 bad++;
