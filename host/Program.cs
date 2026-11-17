@@ -16,11 +16,23 @@ static class Program
         }
     }
 
+    static string Find(string name)
+    {
+        foreach (var root in new[] { AppContext.BaseDirectory, "dlls", "../dlls", "../../dlls" })
+        {
+            var p = System.IO.Path.Combine(root, name);
+            if (System.IO.File.Exists(p)) return System.IO.Path.GetFullPath(p);
+        }
+        throw new System.IO.FileNotFoundException("not found: " + name + " (cwd=" + System.IO.Directory.GetCurrentDirectory() + ")");
+    }
+
+    static Assembly Load(string name) => Assembly.LoadFrom(Find(name));
+
     static void Main()
     {
-        var acs = Assembly.LoadFrom("../dlls/Assembly-CSharp.dll");
-        var way = Assembly.LoadFrom("../dlls/Waylith.dll");
-        var uni = Assembly.LoadFrom("../dlls/UnityStubs.dll");
+        var acs = Load("Assembly-CSharp.dll");
+        var way = Load("Waylith.dll");
+        var uni = Load("UnityStubs.dll");
 
         Console.WriteLine("== Graphic.DrawMeshInt ==");
         Dump(acs.GetType("Verse.Graphic"), "DrawMeshInt");
