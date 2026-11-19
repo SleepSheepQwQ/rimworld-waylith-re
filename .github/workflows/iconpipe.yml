@@ -52,6 +52,7 @@ jobs:
       - name: Decode, render and assert
         run: |
           set -o pipefail
+          mkdir -p build
           python3 pipe/run_pipeline.py \
             --inject-fault "${{ inputs.inject_fault || 'none' }}" \
             --summary build/summary.md \
