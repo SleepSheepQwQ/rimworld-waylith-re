@@ -1,0 +1,142 @@
+[
+  {
+    "claim": "discard 128px: real mask with white _Color is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "discard 128px: null (black) mask is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "UI 128px: real mask with white _Color is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "UI 128px: null (black) mask is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "discard 128px: tinted mask changes colour only (identical survivor set)",
+    "pass": true,
+    "detail": "IoU=1.0, 0 flips for all 6; min mean|dRGB|=0.0260, max channel delta 0.450"
+  },
+  {
+    "claim": "discard 128px: mask-as-main (R reading) fills the slot nearly black",
+    "pass": true,
+    "detail": "coverage=100%, tile luma 0.0025 vs passthrough 0.0362 (x0.07)"
+  },
+  {
+    "claim": "discard 128px: mask-as-main (alpha reading) survives only where the mask is",
+    "pass": true,
+    "detail": "tile luma max 0.00000, every surviving pixel pure black, coverage 1.3..18.4%"
+  },
+  {
+    "claim": "UI 128px: mask-as-main (R reading) becomes an opaque dark box, not a missing icon",
+    "pass": true,
+    "detail": "opaque 100%, ink 0.1275 vs empty-slot baseline 0.0636 (x2.0), mean R=0.064"
+  },
+  {
+    "claim": "UI 128px: mask-as-main (alpha reading) leaves almost no trace on the button",
+    "pass": true,
+    "detail": "ink 0.0085 vs baseline 0.0636 (13%), opaque 1.3..18.4%"
+  },
+  {
+    "claim": "discard 64px: real mask with white _Color is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "discard 64px: null (black) mask is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "UI 64px: real mask with white _Color is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "UI 64px: null (black) mask is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "discard 64px: tinted mask changes colour only (identical survivor set)",
+    "pass": true,
+    "detail": "IoU=1.0, 0 flips for all 6; min mean|dRGB|=0.0273, max channel delta 0.450"
+  },
+  {
+    "claim": "discard 64px: mask-as-main (R reading) fills the slot nearly black",
+    "pass": true,
+    "detail": "coverage=100%, tile luma 0.0028 vs passthrough 0.0386 (x0.07)"
+  },
+  {
+    "claim": "discard 64px: mask-as-main (alpha reading) survives only where the mask is",
+    "pass": true,
+    "detail": "tile luma max 0.00000, every surviving pixel pure black, coverage 1.2..19.0%"
+  },
+  {
+    "claim": "UI 64px: mask-as-main (R reading) becomes an opaque dark box, not a missing icon",
+    "pass": true,
+    "detail": "opaque 100%, ink 0.1260 vs empty-slot baseline 0.0642 (x2.0), mean R=0.069"
+  },
+  {
+    "claim": "UI 64px: mask-as-main (alpha reading) leaves almost no trace on the button",
+    "pass": true,
+    "detail": "ink 0.0090 vs baseline 0.0642 (14%), opaque 1.2..19.0%"
+  },
+  {
+    "claim": "discard 32px: real mask with white _Color is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "discard 32px: null (black) mask is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "UI 32px: real mask with white _Color is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "UI 32px: null (black) mask is bit-identical to passthrough",
+    "pass": true,
+    "detail": "max channel delta over 6 fixtures = 0"
+  },
+  {
+    "claim": "discard 32px: tinted mask changes colour only (identical survivor set)",
+    "pass": true,
+    "detail": "IoU=1.0, 0 flips for all 6; min mean|dRGB|=0.0329, max channel delta 0.450"
+  },
+  {
+    "claim": "discard 32px: mask-as-main (R reading) fills the slot nearly black",
+    "pass": true,
+    "detail": "coverage=100%, tile luma 0.0034 vs passthrough 0.0424 (x0.08)"
+  },
+  {
+    "claim": "discard 32px: mask-as-main (alpha reading) survives only where the mask is",
+    "pass": true,
+    "detail": "tile luma max 0.00000, every surviving pixel pure black, coverage 1.7..20.6%"
+  },
+  {
+    "claim": "UI 32px: mask-as-main (R reading) becomes an opaque dark box, not a missing icon",
+    "pass": true,
+    "detail": "opaque 100%, ink 0.1238 vs empty-slot baseline 0.0646 (x1.9), mean R=0.076"
+  },
+  {
+    "claim": "UI 32px: mask-as-main (alpha reading) leaves almost no trace on the button",
+    "pass": true,
+    "detail": "ink 0.0100 vs baseline 0.0646 (15%), opaque 1.7..20.6%"
+  },
+  {
+    "claim": "icon size barely moves coverage (128 -> 32)",
+    "pass": true,
+    "detail": "opaque fraction 21.61% -> 21.08% (2.5% relative)"
+  }
+]

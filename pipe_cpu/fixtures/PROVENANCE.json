@@ -1,0 +1,179 @@
+{
+  "source_zip": "Odyssey-Assets.zip",
+  "pairs": [
+    {
+      "main": {
+        "file": "fixtures/UniqueAssaultRifleA.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/AssaultRifle/UniqueAssaultRifleA.png.dds",
+        "bytes": 22020,
+        "sha256": "78e264b45fcbe06e7064a40d84ed1b423d3c931cc4162d1159fe000a15b8d758",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 25,
+          "single_channel": 0
+        }
+      },
+      "mask": {
+        "file": "fixtures/UniqueAssaultRifleA_m_mask.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/AssaultRifle/UniqueAssaultRifleA_m.png.dds",
+        "bytes": 11084,
+        "sha256": "46ea223528b604c29208bdc204ef45e32d90d57d196fa75389a483b9529fa18a",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 26,
+          "single_channel": 1
+        }
+      },
+      "name": "UniqueAssaultRifleA"
+    },
+    {
+      "main": {
+        "file": "fixtures/UniqueBeamRepeaterB.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/BeamRepeater/UniqueBeamRepeaterB.png.dds",
+        "bytes": 22020,
+        "sha256": "1aa58d4c5a42f308f139cbd755279c6b77fb05ab92ce38e77cd85b625dfb2a7a",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 25,
+          "single_channel": 0
+        }
+      },
+      "mask": {
+        "file": "fixtures/UniqueBeamRepeaterB_m_mask.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/BeamRepeater/UniqueBeamRepeaterB_m.png.dds",
+        "bytes": 11084,
+        "sha256": "aca6d4b08ad9bc1850304d93b81db8d52e97bd1bc454c5f6dddb3b1590fdb8a5",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 26,
+          "single_channel": 1
+        }
+      },
+      "name": "UniqueBeamRepeaterB"
+    },
+    {
+      "main": {
+        "file": "fixtures/UniqueBoltActionRifleC.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/BoltActionRifle/UniqueBoltActionRifleC.png.dds",
+        "bytes": 22020,
+        "sha256": "310d2c6a30298b0a89310227d94f9bb3b57b45d7033177cdd52051d044566ba9",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 25,
+          "single_channel": 0
+        }
+      },
+      "mask": {
+        "file": "fixtures/UniqueBoltActionRifleC_m_mask.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/BoltActionRifle/UniqueBoltActionRifleC_m.png.dds",
+        "bytes": 11084,
+        "sha256": "10e5ba523d13dd1463e57cff8891c1debd2b28231a758037f666e9ee3a38aa1b",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 26,
+          "single_channel": 1
+        }
+      },
+      "name": "UniqueBoltActionRifleC"
+    },
+    {
+      "main": {
+        "file": "fixtures/UniqueChainShotgunA.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/ChainShotgun/UniqueChainShotgunA.png.dds",
+        "bytes": 22020,
+        "sha256": "c289a0ac036fbb50cb71eec46778d5edfbaac55b08197f06029f55731e533a93",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 25,
+          "single_channel": 0
+        }
+      },
+      "mask": {
+        "file": "fixtures/UniqueChainShotgunA_m_mask.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/ChainShotgun/UniqueChainShotgunA_m.png.dds",
+        "bytes": 11084,
+        "sha256": "0fc180e8506ade91b01cfcdc859a33e22e8431d57d1c5166a7ebec0e3b2d5424",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 26,
+          "single_channel": 1
+        }
+      },
+      "name": "UniqueChainShotgunA"
+    },
+    {
+      "main": {
+        "file": "fixtures/UniqueChainShotgunB.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/ChainShotgun/UniqueChainShotgunB.png.dds",
+        "bytes": 22020,
+        "sha256": "4389c37f42d5c6dc88efbb09ff7646d31b262f6483135370ca186fd60a24f4fb",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 25,
+          "single_channel": 0
+        }
+      },
+      "mask": {
+        "file": "fixtures/UniqueChainShotgunB_m_mask.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/ChainShotgun/UniqueChainShotgunB_m.png.dds",
+        "bytes": 11084,
+        "sha256": "0e24fb656dc58834f9376c16c73f06038280019db5a5ca8348c4780561a5b026",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 26,
+          "single_channel": 1
+        }
+      },
+      "name": "UniqueChainShotgunB"
+    },
+    {
+      "main": {
+        "file": "fixtures/UniqueChargeLanceB.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/ChargeLance/UniqueChargeLanceB.png.dds",
+        "bytes": 22020,
+        "sha256": "c17e3b6d34f97b4a312c48a9fa5d2083fb3bff7431837a958b9454b4238b2f72",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 25,
+          "single_channel": 0
+        }
+      },
+      "mask": {
+        "file": "fixtures/UniqueChargeLanceB_m_mask.dds",
+        "zip_entry": "Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/ChargeLance/UniqueChargeLanceB_m.png.dds",
+        "bytes": 11084,
+        "sha256": "ffe77a231c1725c496dd5bd7b4aa8be9d5d8027aee69dcb74374ca120df10f10",
+        "engine_info": {
+          "w": 128,
+          "h": 128,
+          "mips": 8,
+          "fmt_code": 26,
+          "single_channel": 1
+        }
+      },
+      "name": "UniqueChargeLanceB"
+    }
+  ]
+}

@@ -1,0 +1,145 @@
+== CutoutComplex (discard) ==
+| size | case | opaque % | tile luma | mean RGB | mean A | dRGB vs passthrough | max ch delta | IoU | status flips % |
+|---|---|---|---|---|---|---|---|---|---|
+| 128 | `passthrough` | 21.61 | 0.0771 | (0.349, 0.334, 0.330) | 0.980 | - | - | - | - |
+| 128 | `main_mask` (identical) | 21.61 | 0.0771 | (0.349, 0.334, 0.330) | 0.980 | 0.0000 | 0.000 | 1.000 | 0.00 |
+| 128 | `main_mask_tint` | 21.61 | 0.0564 | (0.260, 0.246, 0.255) | 0.980 | 0.0842 | 0.450 | 1.000 | 0.00 |
+| 128 | `main_null` (identical) | 21.61 | 0.0771 | (0.349, 0.334, 0.330) | 0.980 | 0.0000 | 0.000 | 1.000 | 0.00 |
+| 128 | `mask_as_main` | 100.00 | 0.0137 | (0.064, 0.000, 0.000) | 1.000 | 0.2921 | 1.000 | 0.216 | 78.39 |
+| 128 | `full_swap` | 100.00 | 0.0137 | (0.064, 0.000, 0.000) | 1.000 | 0.2921 | 1.000 | 0.216 | 78.39 |
+| 128 | `mask_as_main__r` | 100.00 | 0.0137 | (0.064, 0.000, 0.000) | 1.000 | 0.2921 | 1.000 | 0.216 | 78.39 |
+| 128 | `mask_as_main__alpha` | 6.54 | 0.0000 | (0.000, 0.000, 0.000) | 0.950 | 0.7560 | 1.000 | 0.270 | 15.07 |
+| 128 | `mask_as_main__replicate` | 6.54 | 0.0630 | (0.950, 0.950, 0.950) | 0.950 | 0.1958 | 0.925 | 0.270 | 15.07 |
+| 64 | `passthrough` | 21.54 | 0.0810 | (0.370, 0.355, 0.350) | 0.966 | - | - | - | - |
+| 64 | `main_mask` (identical) | 21.54 | 0.0810 | (0.370, 0.355, 0.350) | 0.966 | 0.0000 | 0.000 | 1.000 | 0.00 |
+| 64 | `main_mask_tint` | 21.54 | 0.0596 | (0.277, 0.262, 0.272) | 0.966 | 0.0876 | 0.450 | 1.000 | 0.00 |
+| 64 | `main_null` (identical) | 21.54 | 0.0810 | (0.370, 0.355, 0.350) | 0.966 | 0.0000 | 0.000 | 1.000 | 0.00 |
+| 64 | `mask_as_main` | 100.00 | 0.0146 | (0.069, 0.000, 0.000) | 1.000 | 0.3056 | 1.000 | 0.215 | 78.46 |
+| 64 | `full_swap` | 100.00 | 0.0146 | (0.069, 0.000, 0.000) | 1.000 | 0.3056 | 1.000 | 0.215 | 78.46 |
+| 64 | `mask_as_main__r` | 100.00 | 0.0146 | (0.069, 0.000, 0.000) | 1.000 | 0.3056 | 1.000 | 0.215 | 78.46 |
+| 64 | `mask_as_main__alpha` | 7.02 | 0.0000 | (0.000, 0.000, 0.000) | 0.906 | 0.7376 | 1.000 | 0.293 | 14.51 |
+| 64 | `mask_as_main__replicate` | 7.02 | 0.0648 | (0.906, 0.906, 0.906) | 0.906 | 0.1700 | 0.933 | 0.293 | 14.51 |
+| 32 | `passthrough` | 21.08 | 0.0871 | (0.408, 0.393, 0.388) | 0.944 | - | - | - | - |
+| 32 | `main_mask` (identical) | 21.08 | 0.0871 | (0.408, 0.393, 0.388) | 0.944 | 0.0000 | 0.000 | 1.000 | 0.00 |
+| 32 | `main_mask_tint` | 21.08 | 0.0650 | (0.311, 0.296, 0.306) | 0.944 | 0.0922 | 0.450 | 1.000 | 0.00 |
+| 32 | `main_null` (identical) | 21.08 | 0.0871 | (0.408, 0.393, 0.388) | 0.944 | 0.0000 | 0.000 | 1.000 | 0.00 |
+| 32 | `mask_as_main` | 100.00 | 0.0161 | (0.076, 0.000, 0.000) | 1.000 | 0.3334 | 1.000 | 0.211 | 78.92 |
+| 32 | `full_swap` | 100.00 | 0.0161 | (0.076, 0.000, 0.000) | 1.000 | 0.3334 | 1.000 | 0.211 | 78.92 |
+| 32 | `mask_as_main__r` | 100.00 | 0.0161 | (0.076, 0.000, 0.000) | 1.000 | 0.3334 | 1.000 | 0.211 | 78.92 |
+| 32 | `mask_as_main__alpha` | 7.80 | 0.0000 | (0.000, 0.000, 0.000) | 0.843 | 0.7014 | 1.000 | 0.331 | 13.28 |
+| 32 | `mask_as_main__replicate` | 7.80 | 0.0677 | (0.843, 0.843, 0.843) | 0.843 | 0.1461 | 0.675 | 0.331 | 13.28 |
+
+== CutoutComplexUI (no discard, alpha blended) ==
+| size | case | opaque % | tile luma | mean RGB | mean A | dRGB vs passthrough | max ch delta | IoU | status flips %  ink |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 128 | `passthrough` | 21.61 | 0.0776 | (0.351, 0.337, 0.333) | 0.980 | - | - | - | -  0.0636 |
+| 128 | `main_mask` (identical) | 21.61 | 0.0776 | (0.351, 0.337, 0.333) | 0.980 | 0.0000 | 0.000 | 1.000 | 0.00  0.0636 |
+| 128 | `main_mask_tint` | 21.61 | 0.0569 | (0.262, 0.248, 0.258) | 0.980 | 0.0842 | 0.450 | 1.000 | 0.00  0.0430 |
+| 128 | `main_null` (identical) | 21.61 | 0.0776 | (0.351, 0.337, 0.333) | 0.980 | 0.0000 | 0.000 | 1.000 | 0.00  0.0636 |
+| 128 | `mask_as_main` | 100.00 | 0.0137 | (0.064, 0.000, 0.000) | 1.000 | 0.2947 | 1.000 | 0.216 | 78.39  0.1275 |
+| 128 | `full_swap` | 100.00 | 0.0137 | (0.064, 0.000, 0.000) | 1.000 | 0.2947 | 1.000 | 0.216 | 78.39  0.1275 |
+| 128 | `mask_as_main__r` | 100.00 | 0.0137 | (0.064, 0.000, 0.000) | 1.000 | 0.2947 | 1.000 | 0.216 | 78.39  0.1275 |
+| 128 | `mask_as_main__alpha` | 6.54 | 0.0003 | (0.007, 0.007, 0.008) | 0.950 | 0.7509 | 1.000 | 0.270 | 15.07  0.0085 |
+| 128 | `mask_as_main__replicate` | 6.54 | 0.0618 | (0.925, 0.925, 0.926) | 0.950 | 0.1758 | 0.925 | 0.270 | 15.07  0.0534 |
+| 64 | `passthrough` | 21.54 | 0.0817 | (0.373, 0.358, 0.354) | 0.966 | - | - | - | -  0.0642 |
+| 64 | `main_mask` (identical) | 21.54 | 0.0817 | (0.373, 0.358, 0.354) | 0.966 | 0.0000 | 0.000 | 1.000 | 0.00  0.0642 |
+| 64 | `main_mask_tint` | 21.54 | 0.0604 | (0.281, 0.266, 0.277) | 0.966 | 0.0874 | 0.450 | 1.000 | 0.00  0.0430 |
+| 64 | `main_null` (identical) | 21.54 | 0.0817 | (0.373, 0.358, 0.354) | 0.966 | 0.0000 | 0.000 | 1.000 | 0.00  0.0642 |
+| 64 | `mask_as_main` | 100.00 | 0.0146 | (0.069, 0.000, 0.000) | 1.000 | 0.3097 | 1.000 | 0.215 | 78.46  0.1260 |
+| 64 | `full_swap` | 100.00 | 0.0146 | (0.069, 0.000, 0.000) | 1.000 | 0.3097 | 1.000 | 0.215 | 78.46  0.1260 |
+| 64 | `mask_as_main__r` | 100.00 | 0.0146 | (0.069, 0.000, 0.000) | 1.000 | 0.3097 | 1.000 | 0.215 | 78.46  0.1260 |
+| 64 | `mask_as_main__alpha` | 7.02 | 0.0007 | (0.012, 0.012, 0.014) | 0.906 | 0.7232 | 1.000 | 0.293 | 14.51  0.0090 |
+| 64 | `mask_as_main__replicate` | 7.02 | 0.0618 | (0.854, 0.854, 0.856) | 0.906 | 0.1356 | 0.928 | 0.293 | 14.51  0.0534 |
+| 32 | `passthrough` | 21.08 | 0.0869 | (0.407, 0.392, 0.387) | 0.944 | - | - | - | -  0.0646 |
+| 32 | `main_mask` (identical) | 21.08 | 0.0869 | (0.407, 0.392, 0.387) | 0.944 | 0.0000 | 0.000 | 1.000 | 0.00  0.0646 |
+| 32 | `main_mask_tint` | 21.08 | 0.0651 | (0.311, 0.296, 0.307) | 0.944 | 0.0909 | 0.450 | 1.000 | 0.00  0.0428 |
+| 32 | `main_null` (identical) | 21.08 | 0.0869 | (0.407, 0.392, 0.387) | 0.944 | 0.0000 | 0.000 | 1.000 | 0.00  0.0646 |
+| 32 | `mask_as_main` | 100.00 | 0.0161 | (0.076, 0.000, 0.000) | 1.000 | 0.3341 | 1.000 | 0.211 | 78.92  0.1238 |
+| 32 | `full_swap` | 100.00 | 0.0161 | (0.076, 0.000, 0.000) | 1.000 | 0.3341 | 1.000 | 0.211 | 78.92  0.1238 |
+| 32 | `mask_as_main__r` | 100.00 | 0.0161 | (0.076, 0.000, 0.000) | 1.000 | 0.3341 | 1.000 | 0.211 | 78.92  0.1238 |
+| 32 | `mask_as_main__alpha` | 7.80 | 0.0014 | (0.020, 0.020, 0.023) | 0.843 | 0.6737 | 1.000 | 0.331 | 13.28  0.0100 |
+| 32 | `mask_as_main__replicate` | 7.80 | 0.0619 | (0.757, 0.757, 0.760) | 0.843 | 0.1290 | 0.675 | 0.331 | 13.28  0.0536 |
+
+128 main_mask              tile_luma 0.0362 (UniqueChainShotgunB) .. 0.1456 (UniqueChargeLanceB)
+128 main_null              tile_luma 0.0362 (UniqueChainShotgunB) .. 0.1456 (UniqueChargeLanceB)
+128 mask_as_main__r        tile_luma 0.0025 (UniqueChainShotgunB) .. 0.0387 (UniqueChargeLanceB)
+128 mask_as_main__alpha    tile_luma 0.0000 (UniqueAssaultRifleA) .. 0.0000 (UniqueAssaultRifleA)
+    main_mask              UI ink 0.0294 .. 0.1226
+    main_null              UI ink 0.0294 .. 0.1226
+    mask_as_main__r        UI ink 0.1213 .. 0.1305
+    mask_as_main__alpha    UI ink 0.0015 .. 0.0239
+ 64 main_mask              tile_luma 0.0386 (UniqueChainShotgunB) .. 0.1519 (UniqueChargeLanceB)
+ 64 main_null              tile_luma 0.0386 (UniqueChainShotgunB) .. 0.1519 (UniqueChargeLanceB)
+ 64 mask_as_main__r        tile_luma 0.0028 (UniqueChainShotgunB) .. 0.0403 (UniqueChargeLanceB)
+ 64 mask_as_main__alpha    tile_luma 0.0000 (UniqueAssaultRifleA) .. 0.0000 (UniqueAssaultRifleA)
+    main_mask              UI ink 0.0292 .. 0.1230
+    main_null              UI ink 0.0292 .. 0.1230
+    mask_as_main__r        UI ink 0.1187 .. 0.1301
+    mask_as_main__alpha    UI ink 0.0017 .. 0.0249
+ 32 main_mask              tile_luma 0.0424 (UniqueChainShotgunB) .. 0.1585 (UniqueChargeLanceB)
+ 32 main_null              tile_luma 0.0424 (UniqueChainShotgunB) .. 0.1585 (UniqueChargeLanceB)
+ 32 mask_as_main__r        tile_luma 0.0034 (UniqueChainShotgunB) .. 0.0428 (UniqueChargeLanceB)
+ 32 mask_as_main__alpha    tile_luma 0.0000 (UniqueAssaultRifleA) .. 0.0000 (UniqueAssaultRifleA)
+    main_mask              UI ink 0.0290 .. 0.1239
+    main_null              UI ink 0.0290 .. 0.1239
+    mask_as_main__r        UI ink 0.1148 .. 0.1292
+    mask_as_main__alpha    UI ink 0.0021 .. 0.0264
+
+PASS  discard 128px: real mask with white _Color is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  discard 128px: null (black) mask is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  UI 128px: real mask with white _Color is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  UI 128px: null (black) mask is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  discard 128px: tinted mask changes colour only (identical survivor set)
+        IoU=1.0, 0 flips for all 6; min mean|dRGB|=0.0260, max channel delta 0.450
+PASS  discard 128px: mask-as-main (R reading) fills the slot nearly black
+        coverage=100%, tile luma 0.0025 vs passthrough 0.0362 (x0.07)
+PASS  discard 128px: mask-as-main (alpha reading) survives only where the mask is
+        tile luma max 0.00000, every surviving pixel pure black, coverage 1.3..18.4%
+PASS  UI 128px: mask-as-main (R reading) becomes an opaque dark box, not a missing icon
+        opaque 100%, ink 0.1275 vs empty-slot baseline 0.0636 (x2.0), mean R=0.064
+PASS  UI 128px: mask-as-main (alpha reading) leaves almost no trace on the button
+        ink 0.0085 vs baseline 0.0636 (13%), opaque 1.3..18.4%
+PASS  discard 64px: real mask with white _Color is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  discard 64px: null (black) mask is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  UI 64px: real mask with white _Color is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  UI 64px: null (black) mask is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  discard 64px: tinted mask changes colour only (identical survivor set)
+        IoU=1.0, 0 flips for all 6; min mean|dRGB|=0.0273, max channel delta 0.450
+PASS  discard 64px: mask-as-main (R reading) fills the slot nearly black
+        coverage=100%, tile luma 0.0028 vs passthrough 0.0386 (x0.07)
+PASS  discard 64px: mask-as-main (alpha reading) survives only where the mask is
+        tile luma max 0.00000, every surviving pixel pure black, coverage 1.2..19.0%
+PASS  UI 64px: mask-as-main (R reading) becomes an opaque dark box, not a missing icon
+        opaque 100%, ink 0.1260 vs empty-slot baseline 0.0642 (x2.0), mean R=0.069
+PASS  UI 64px: mask-as-main (alpha reading) leaves almost no trace on the button
+        ink 0.0090 vs baseline 0.0642 (14%), opaque 1.2..19.0%
+PASS  discard 32px: real mask with white _Color is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  discard 32px: null (black) mask is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  UI 32px: real mask with white _Color is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  UI 32px: null (black) mask is bit-identical to passthrough
+        max channel delta over 6 fixtures = 0
+PASS  discard 32px: tinted mask changes colour only (identical survivor set)
+        IoU=1.0, 0 flips for all 6; min mean|dRGB|=0.0329, max channel delta 0.450
+PASS  discard 32px: mask-as-main (R reading) fills the slot nearly black
+        coverage=100%, tile luma 0.0034 vs passthrough 0.0424 (x0.08)
+PASS  discard 32px: mask-as-main (alpha reading) survives only where the mask is
+        tile luma max 0.00000, every surviving pixel pure black, coverage 1.7..20.6%
+PASS  UI 32px: mask-as-main (R reading) becomes an opaque dark box, not a missing icon
+        opaque 100%, ink 0.1238 vs empty-slot baseline 0.0646 (x1.9), mean R=0.076
+PASS  UI 32px: mask-as-main (alpha reading) leaves almost no trace on the button
+        ink 0.0100 vs baseline 0.0646 (15%), opaque 1.7..20.6%
+PASS  icon size barely moves coverage (128 -> 32)
+        opaque fraction 21.61% -> 21.08% (2.5% relative)
+
+28/28 claims hold

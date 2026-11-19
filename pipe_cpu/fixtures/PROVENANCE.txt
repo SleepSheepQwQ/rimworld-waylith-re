@@ -1,0 +1,25 @@
+Real texture pairs copied verbatim (byte-identical) from the installed game:
+  <device>/game/Data/Odyssey/Assets.zip  (zstd-compressed entries)
+
+Only the two 128x128 DDS files per pair are kept, so CI needs no 100 MB zip.
+Formats: main = BC7_UNORM (dxgi 98, engine format code 25),
+         mask = BC4_UNORM (dxgi 80, engine format code 26, single_channel=1).
+
+UniqueAssaultRifleA
+  main UniqueAssaultRifleA.dds                         22020 B  sha256=78e264b45fcbe06e  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 25, 'single_channel': 0}
+  mask UniqueAssaultRifleA_m_mask.dds                  11084 B  sha256=46ea223528b604c2  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 26, 'single_channel': 1}
+UniqueBeamRepeaterB
+  main UniqueBeamRepeaterB.dds                         22020 B  sha256=1aa58d4c5a42f308  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 25, 'single_channel': 0}
+  mask UniqueBeamRepeaterB_m_mask.dds                  11084 B  sha256=aca6d4b08ad9bc18  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 26, 'single_channel': 1}
+UniqueBoltActionRifleC
+  main UniqueBoltActionRifleC.dds                      22020 B  sha256=310d2c6a30298b0a  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 25, 'single_channel': 0}
+  mask UniqueBoltActionRifleC_m_mask.dds               11084 B  sha256=10e5ba523d13dd14  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 26, 'single_channel': 1}
+UniqueChainShotgunA
+  main UniqueChainShotgunA.dds                         22020 B  sha256=c289a0ac036fbb50  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 25, 'single_channel': 0}
+  mask UniqueChainShotgunA_m_mask.dds                  11084 B  sha256=0fc180e8506ade91  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 26, 'single_channel': 1}
+UniqueChainShotgunB
+  main UniqueChainShotgunB.dds                         22020 B  sha256=4389c37f42d5c6dc  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 25, 'single_channel': 0}
+  mask UniqueChainShotgunB_m_mask.dds                  11084 B  sha256=0e24fb656dc58834  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 26, 'single_channel': 1}
+UniqueChargeLanceB
+  main UniqueChargeLanceB.dds                          22020 B  sha256=c17e3b6d34f97b4a  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 25, 'single_channel': 0}
+  mask UniqueChargeLanceB_m_mask.dds                   11084 B  sha256=ffe77a231c1725c4  info={'w': 128, 'h': 128, 'mips': 8, 'fmt_code': 26, 'single_channel': 1}

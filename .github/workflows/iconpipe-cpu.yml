@@ -1,0 +1,65 @@
+name: iconpipe-cpu
+
+# The icon material evaluated on the CPU: real BC7 main + real BC4 mask textures, the fragment
+# shader transcribed from CutoutComplex.frag.glsl, the game's own mip chain for minification.
+# No Vulkan, no GPU, no window: this is the independent second opinion on the pixel behaviour that
+# the lavapipe harness in vk/ measures.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'pipe_cpu/**'
+      - '.github/workflows/iconpipe-cpu.yml'
+
+jobs:
+  cpu-pipe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The only dependency. BC7 decoding is delegated to it on purpose (see pipe_cpu/README.md);
+      # BC4 and the shader maths are local code.
+      - name: Install Pillow
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet "pillow==12.3.0" || python -m pip install --quiet pillow
+          python -c "import PIL; print('Pillow', PIL.__version__)"
+
+      # Must pass before any pixel number is trusted: BC4 bit-exactness, BC7 mip-level slicing,
+      # no degenerate (all-zero) decode.
+      - name: Decoder + fixture validation
+        run: python pipe_cpu/validate.py
+
+      - name: Three input classes at three icon sizes
+        run: |
+          set -euo pipefail
+          mkdir -p pipe_cpu/out
+          python pipe_cpu/run.py | tee pipe_cpu/out/run.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## iconpipe-cpu'
+            echo
+            cat pipe_cpu/out/TABLE.md
+            echo
+            echo '### claims'
+            echo
+            echo '```'
+            grep -E '^(PASS|FAIL)' -A1 pipe_cpu/out/run.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iconpipe-cpu-out
+          path: pipe_cpu/out
+          if-no-files-found: error
