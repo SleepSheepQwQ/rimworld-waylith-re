@@ -1,2 +1,5 @@
 # iconpipe build output (SHAs, .rgba, PPM renders, reports)
 build/
+# dotnet build output (flowb and friends)
+**/bin/
+**/obj/

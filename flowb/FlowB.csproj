@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>IconFlowB</AssemblyName>
+    <RootNamespace>IconFlowB</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    flowb: independent check of Verse.Graphic_Collection that EXECUTES the real
+    Verse.Graphic_Collection.Init / Verse.Graphic_Random.SubGraphicFor out of
+    dlls/Assembly-CSharp.dll (the Waylith net10.0 build), instead of re-implementing
+    the decompiled source the way flow/ does.
+
+    Only two references, and only because their types appear in the signatures we
+    call: Assembly-CSharp (Init/SubGraphicFor) and UnityStubs (Texture2D). No Harmony:
+    MonoMod's detour factory throws PlatformTriple NotImplementedException on Android,
+    so nothing is patched - we instead populate the game's own content tables
+    (LoadedModManager.RunningModsListForReading -> ModContentPack.textures ->
+    ModContentHolder<Texture2D>.contentList) and let ContentFinder run for real.
+  -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>../dlls/Assembly-CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UnityStubs">
+      <HintPath>../dlls/UnityStubs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

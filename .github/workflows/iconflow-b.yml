@@ -1,0 +1,43 @@
+name: iconflow-b
+
+# Independent check of Verse.Graphic_Collection that EXECUTES the real Init /
+# SubGraphicFor out of dlls/Assembly-CSharp.dll instead of re-implementing the
+# decompiled source. flow/ covers the re-implementation; the two should agree.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: build the flowb harness
+        run: dotnet build flowb/FlowB.csproj -c Release -v m
+
+      - name: run Graphic_Collection.Init against both naming conventions
+        run: |
+          set -o pipefail
+          dotnet flowb/bin/Release/net10.0/IconFlowB.dll "$PWD/dlls" | tee flowb.log
+
+      - name: publish the table and the assertions
+        if: always()
+        run: |
+          {
+            echo '### iconflow-b — real Graphic_Collection.Init'
+            echo '```'
+            sed -n '/^## table/,$p' flowb.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload the full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iconflow-b-log
+          path: flowb.log
