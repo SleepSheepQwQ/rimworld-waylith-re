@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A MINIMAL stand-in for dlls/UnityStubs.dll, so that dlls/Assembly-CSharp.dll can be
+       executed head-less. The shipped UnityStubs binds to the Waylith engine (Brutal.Vulkan,
+       Brutal.Core.Logging, ...), which is not in this repo, so a Texture2D cannot even be
+       allocated here. This project declares only the UnityEngine surface that the code under
+       test touches, with the semantics that matter for material pool keys:
+
+         Object/Texture name + reference equality   (Unity's == on a live object is identity)
+         Color by value, Color32 as the 8-bit quantiser MatFrom routes colours through
+         Material records every Set* call, so two materials can be compared property by property
+         Shader declares _MaskTex, so Verse.ShaderUtility.SupportsMaskTex agrees with a real
+                             CutoutComplex shader instead of silently dropping the mask
+
+       AssemblyName/version must match what Assembly-CSharp references (UnityStubs 1.0.0.0). -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>UnityStubs</AssemblyName>
+    <RootNamespace>UnityEngine</RootNamespace>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.0.0</Version>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0660;CS0661;CS0108</NoWarn>
+  </PropertyGroup>
+
+</Project>

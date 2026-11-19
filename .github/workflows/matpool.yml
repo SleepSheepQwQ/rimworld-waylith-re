@@ -1,0 +1,76 @@
+name: matpool
+
+# Verse.MaterialPool's cache key as assertions, by executing it: dlls/Assembly-CSharp.dll is
+# loaded and its own MatFrom / MaterialRequest.Equals / GetHashCode run against a minimal
+# UnityEngine stub. No game, no Unity, no GPU, no engine assemblies.
+#
+#   A  same texture + same colour                  -> same instance
+#   B  same texture, colour/colorTwo differs       -> new instance
+#   C  same texture, maskTex differs               -> new instance
+#   D  same contents, different List instance      -> MISS (reference compare; the bloat point)
+#   E  colour below 1/255                          -> hit (MatFrom quantises via Color32)
+#
+# The dll's constants and IL shape are read from dlls/Assembly-CSharp.dll, so a build whose
+# MaterialPool keys on something else turns the run BROKEN (exit 2) instead of green.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_fail:
+        description: 'add a deliberately failing assertion (control run; the job must go red)'
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'mat/**'
+      - '.github/workflows/matpool.yml'
+
+jobs:
+  key:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Reference assembly
+        run: |
+          ls -l dlls/Assembly-CSharp.dll
+          md5sum dlls/Assembly-CSharp.dll
+
+      - name: Build
+        run: dotnet build mat/Mat.csproj -c Release -v minimal
+
+      - name: Cache-key assertions
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p mat/out
+          EXTRA=""
+          if [ "${{ inputs.force_fail }}" = "true" ]; then EXTRA="--force-fail"; fi
+          dotnet run --project mat/Mat.csproj -c Release --no-build -- \
+            --dlls dlls --table mat/out/matpool-table.md $EXTRA \
+            | tee mat/out/matpool.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### matpool'
+            echo
+            echo '```'
+            grep -E '^\[(FACT|BROKEN|INFO|SCENARIO|PASS|FAIL|BLOAT|CENSUS|SUMMARY)\]|^RESULT:' mat/out/matpool.log || true
+            echo '```'
+            echo
+            cat mat/out/matpool-table.md 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matpool
+          path: |
+            mat/out/matpool-table.md
+            mat/out/matpool.log
