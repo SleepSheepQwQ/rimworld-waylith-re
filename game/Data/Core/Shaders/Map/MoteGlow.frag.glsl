@@ -1,0 +1,33 @@
+#version 450
+
+#ifdef INSTANCED
+#include "InstanceTransforms.glsl"
+#include "InstanceColors.glsl"
+#endif
+
+layout(location = 0) in vec4 vColor;
+layout(location = 1) in vec2 vUv;
+layout(location = 2) in vec4 vInstColor;
+
+layout(location = 0) out vec4 outColor;
+
+layout(set = 2, binding = 0) uniform MaterialUniforms
+{
+    vec4 _Color;      // @color @default = vec4(1.0, 1.0, 1.0, 1.0)
+    vec4 _MainTex_ST; // @default = vec4(0.0, 0.0, 1.0, 1.0)
+    vec4 _Color2;     // @color @default = vec4(1.0, 1.0, 1.0, 1.0)
+} uMaterial;
+
+layout(set = 2, binding = 1) uniform sampler2D _MainTex;
+
+void main()
+{
+    vec2 uv = vUv * uMaterial._MainTex_ST.zw + uMaterial._MainTex_ST.xy;
+#ifdef INSTANCED
+    vec4 tint = vInstColor;
+#else
+    vec4 tint = uMaterial._Color;
+#endif
+    vec4 f = texture(_MainTex, uv) * tint * vColor * uMaterial._Color2;
+    outColor = clamp(f, 0.0, 1.0);
+}

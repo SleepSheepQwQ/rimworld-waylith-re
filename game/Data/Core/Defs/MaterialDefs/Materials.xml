@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+
+  <MaterialDef>
+    <defName>GravshipOpaqueBase</defName>
+    <resourcePath>Map/Gravship/GravshipOpaqueBase</resourcePath>
+    <shader>SolidColor</shader>
+    <renderQueue>1000</renderQueue>
+    <colors>
+      <li>
+        <name>_Color</name>
+        <value>(0, 0, 0, 1)</value>
+      </li>
+    </colors>
+  </MaterialDef>
+
+  <MaterialDef>
+    <defName>VacuumOverlayTransition</defName>
+    <resourcePath>Map/OxygenOverlay/VacuumOverlayTransition</resourcePath>
+    <shader>VacuumOverlay</shader>
+    <textures>
+      <li MayRequire="Ludeon.RimWorld.Odyssey">
+        <name>_MaskTex</name>
+        <path>Terrain/Misc/VacuumTransitionGradient</path>
+      </li>
+    </textures>
+    <floats>
+      <li>
+        <name>_Brightness</name>
+        <value>1</value>
+      </li>
+      <li>
+        <name>_Contrast</name>
+        <value>1</value>
+      </li>
+      <li>
+        <name>_Saturation</name>
+        <value>1</value>
+      </li>
+      <li>
+        <name>_SimulateVacuumPercent</name>
+        <value>1</value>
+      </li>
+    </floats>
+    <colors>
+      <li>
+        <name>_Color</name>
+        <value>(0.7411765, 0.8352941, 0.85882354, 1)</value>
+      </li>
+    </colors>
+  </MaterialDef>
+
+  <MaterialDef>
+    <defName>VacuumOverlayTransition2</defName>
+    <resourcePath>Map/OxygenOverlay/VacuumOverlayTransition2</resourcePath>
+    <shader>VacuumOverlayParticles</shader>
+    <renderQueue>3171</renderQueue>
+    <textures>
+      <li MayRequire="Ludeon.RimWorld.Odyssey">
+        <name>_MaskTex</name>
+        <path>Terrain/Misc/VacuumTransitionGradient</path>
+      </li>
+      <li>
+        <name>_MainTex</name>
+        <path>Other/Lumpy</path>
+        <alphaFromGrayscale>true</alphaFromGrayscale>
+        <scale>(-0.75, 0.75)</scale>
+      </li>
+      <li>
+        <name>_MainTex2</name>
+        <path>Weather/Overlays/SnowWorldOverlay</path>
+        <scale>(0.5, 0.5)</scale>
+      </li>
+      <li>
+        <name>_NoiseTex</name>
+        <path>Other/Perlin</path>
+        <alphaFromGrayscale>true</alphaFromGrayscale>
+        <scale>(0.25, 0.35)</scale>
+      </li>
+    </textures>
+    <floats>
+      <li>
+        <name>_MainTex2Speed</name>
+        <value>0.005</value>
+      </li>
+      <li>
+        <name>_MainTexSpeed</name>
+        <value>0.03</value>
+      </li>
+    </floats>
+    <colors>
+      <li>
+        <name>_BobFreqAmp</name>
+        <value>(1, 0.01, 0, 0)</value>
+      </li>
+      <li>
+        <name>_Color</name>
+        <value>(1, 1, 1, 0.5372549)</value>
+      </li>
+      <li>
+        <name>_MainTex2Color</name>
+        <value>(1, 1, 1, 0.39607844)</value>
+      </li>
+      <li>
+        <name>_MainTexColor</name>
+        <value>(1, 1, 1, 0.043137256)</value>
+      </li>
+      <li>
+        <name>_TuningColor</name>
+        <value>(1, 1, 1, 1)</value>
+      </li>
+    </colors>
+  </MaterialDef>
+
+  <MaterialDef>
+    <defName>DebugOverlay</defName>
+    <resourcePath>Misc/DebugOverlay</resourcePath>
+    <shader>SolidColor</shader>
+    <colors>
+      <li>
+        <name>_Color</name>
+        <value>(0.53333336, 0.7293682, 0.98039216, 0.47058824)</value>
+      </li>
+    </colors>
+  </MaterialDef>
+
+</Defs>

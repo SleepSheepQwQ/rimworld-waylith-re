@@ -1,0 +1,105 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<PlayerCreatedBios>
+  
+  <PawnBio Abstract="True" Name="RareSolid">
+    <rare>true</rare>
+    <pirateKing>false</pirateKing>
+  </PawnBio>
+  
+	<PawnBio ParentName="RareSolid">
+		<Name>
+			<First>Tynan</First>
+			<Last>Sylvester</Last>
+			<Nick>Tynan</Nick>
+		</Name>
+		<Gender>Male</Gender>
+		<Childhood>TynanCustomChildhood</Childhood>
+		<Adulthood>TynanCustomAdulthood</Adulthood>
+	</PawnBio>
+  
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>Joe</First>
+      <Last>Gasparich</Last>
+    </Name>
+    <Gender>Male</Gender>
+    <Childhood>JoeCustomChildhood</Childhood>
+    <Adulthood>JoeCustomAdulthood</Adulthood>
+  </PawnBio>
+  
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>Liam</First>
+      <Last>Harrison</Last>
+      <Nick>Static</Nick>
+    </Name>
+    <Gender>Male</Gender>
+    <Childhood>LiamCustomChildhood</Childhood>
+    <Adulthood>LiamCustomAdulthood</Adulthood>
+  </PawnBio>
+
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>Matthew</First>
+      <Last>Ritchie</Last>
+      <Nick>Cynapse</Nick>
+    </Name>
+    <Gender>Male</Gender>
+    <Childhood>CynapseCustomChildhood</Childhood>
+    <Adulthood>CynapseCustomAdulthood</Adulthood>
+  </PawnBio>
+
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>Oskar</First>
+      <Last>Potocki</Last>
+    </Name>
+    <Gender>Male</Gender>
+    <Childhood>OskarCustomChildhood</Childhood>
+    <Adulthood>OskarCustomAdulthood</Adulthood>
+  </PawnBio>
+
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>William</First>
+      <Last>Stacey</Last>
+      <Nick>Will</Nick>
+    </Name>
+    <Gender>Male</Gender>
+    <Childhood>WillCustomChildhood</Childhood>
+    <Adulthood>WillCustomAdulthood</Adulthood>
+  </PawnBio>
+
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>Máté</First>
+      <Last>Mészáros</Last>
+    </Name>
+    <Gender>Male</Gender>
+    <Childhood>MateCustomChildhood</Childhood>
+    <Adulthood>MateCustomAdulthood</Adulthood>
+  </PawnBio>
+
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>Nathan</First>
+      <Last>Cruzan</Last>
+      <Nick>Morg</Nick>
+    </Name>
+    <Gender>Male</Gender>
+    <Childhood>NathanCustomChildhood</Childhood>
+    <Adulthood>NathanCustomAdulthood</Adulthood>
+  </PawnBio>
+
+  <PawnBio ParentName="RareSolid">
+    <Name>
+      <First>Fey</First>
+      <Last>Nickel</Last>
+      <Nick>Pheanox</Nick>
+    </Name>
+    <Gender>Female</Gender>
+    <Childhood>FeyCustomChildhood</Childhood>
+    <Adulthood>FeyCustomAdulthood</Adulthood>
+  </PawnBio>
+
+</PlayerCreatedBios>

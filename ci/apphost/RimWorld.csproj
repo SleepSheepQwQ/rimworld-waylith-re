@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Not a game: this project only exists to make the .NET SDK emit a native apphost named
+    "RimWorld". The game's Bootstrap resolves every path from Path.GetDirectoryName(Process.GetProcessPath()),
+    so the process must be started from an apphost that sits next to RimWorld.dll, Assets.zip and
+    RimWorld_Data - "dotnet RimWorld.dll" points that lookup at the dotnet installation instead.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>RimWorld</AssemblyName>
+    <RootNamespace>ApphostPlaceholder</RootNamespace>
+    <UseAppHost>true</UseAppHost>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+</Project>

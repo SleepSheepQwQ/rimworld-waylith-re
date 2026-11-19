@@ -4,3 +4,6 @@ build/
 **/bin/
 **/obj/
 res/out/
+# headless CI: the assembled game directory and run logs are produced there, never committed
+run/
+out/
