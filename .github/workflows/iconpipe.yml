@@ -74,6 +74,8 @@ jobs:
               echo "_pipeline produced no summary — see the failed step log_"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          echo "job summary written: $(wc -c < "$GITHUB_STEP_SUMMARY") bytes"
+          sed -n '1,8p' "$GITHUB_STEP_SUMMARY"
 
       - name: Print the assertion diffs
         if: failure()
