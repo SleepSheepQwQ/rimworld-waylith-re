@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Verbatim extract of two ThingDefs from the device's own game data:
+
+    /data/data/com.termux/files/home/rw4/Data/Odyssey/Defs/ThingDefs_Items/Weapons_Unique.xml
+    (Odyssey, game build 1.7.9795.32073 - the same build as dlls/Assembly-CSharp.dll)
+
+  Byte-for-byte the shipped <ThingDef> elements: nothing here is edited or retyped. iconexec reads
+  <defName>, <graphicData><texPath>, <graphicClass> and <shaderType> out of this file at run time and
+  builds the GraphicRequest from those values, so a def change in the game data changes the request.
+-->
+<Defs>
+<ThingDef ParentName="Gun_Revolver">
+    <defName>Gun_Revolver_Unique</defName>
+    <label>unique revolver</label>
+    <description>A revolver with customized parts.</description>
+    <graphicData>
+      <texPath>Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver</texPath>
+      <graphicClass>Graphic_Random</graphicClass>
+      <shaderType>CutoutComplex</shaderType>
+    </graphicData>
+    <!-- Can't inherit comps because we need to override CompEquippable with CompEquippableAbility -->
+    <!-- If changes are made to the comps of BaseHumanMakeableGun or parents then they will need to be replicated here -->
+    <comps Inherit="False">
+      <li Class="CompProperties_EquippableAbilityReloadable" /> <!-- Props are populated by traits -->
+      <li Class="CompProperties_Forbiddable"/>
+      <li Class="CompProperties_Styleable"/>
+      <li Class="CompProperties_Biocodable"/>
+      <li>
+        <compClass>CompQuality</compClass>
+      </li>
+      <li Class="CompProperties_Art">
+        <nameMaker>NamerArtWeaponGun</nameMaker>
+        <descriptionMaker>ArtDescription_WeaponGun</descriptionMaker>
+        <minQualityForArtistic>Excellent</minQualityForArtistic>
+      </li>
+      <li Class="CompProperties_UniqueWeapon">
+        <weaponCategories>
+          <li>Ranged</li>
+          <li>BulletFiring</li>
+          <li>Gun</li>
+          <li>Pistol</li>
+          <li>Sighted</li>
+        </weaponCategories>
+        <namerLabels>
+          <li>revolver</li>
+          <li>six-shooter</li>
+          <li>iron</li>
+          <li>hammer</li>
+        </namerLabels>
+      </li>
+    </comps>
+    <generateAllowChance>0</generateAllowChance>
+    <possessionCount>0</possessionCount>
+    <tradeability>Sellable</tradeability>
+    <thingSetMakerTags Inherit="False" >
+      <li>RewardStandardLowFreq</li>
+      <li>UniqueWeapon</li>
+    </thingSetMakerTags>
+    <recipeMaker Inherit="False" IsNull="True" />
+    <thingCategories Inherit="False">
+      <li>WeaponsUnique</li>
+    </thingCategories>
+    <descriptionHyperlinks>
+      <ThingDef>Gun_Revolver</ThingDef>
+    </descriptionHyperlinks>
+  </ThingDef>
+
+<ThingDef ParentName="Gun_HeavySMG">
+    <defName>Gun_HeavySMG_Unique</defName>
+    <label>unique heavy SMG</label>
+    <description>A heavy SMG with customized parts.</description>
+    <graphicData>
+      <texPath>Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG</texPath>
+      <graphicClass>Graphic_Random</graphicClass>
+      <shaderType>CutoutComplex</shaderType>
+    </graphicData>
+    <!-- Can't inherit comps because we need to override CompEquippable with CompEquippableAbility -->
+    <!-- If changes are made to the comps of BaseHumanMakeableGun or parents then they will need to be replicated here -->
+    <comps Inherit="False">
+      <li Class="CompProperties_EquippableAbilityReloadable" /> <!-- Props are populated by traits -->
+      <li Class="CompProperties_Forbiddable"/>
+      <li Class="CompProperties_Styleable"/>
+      <li Class="CompProperties_Biocodable"/>
+      <li>
+        <compClass>CompQuality</compClass>
+      </li>
+      <li Class="CompProperties_Art">
+        <nameMaker>NamerArtWeaponGun</nameMaker>
+        <descriptionMaker>ArtDescription_WeaponGun</descriptionMaker>
+        <minQualityForArtistic>Excellent</minQualityForArtistic>
+      </li>
+      <li Class="CompProperties_UniqueWeapon">
+        <weaponCategories>
+          <li>Ranged</li>
+          <li>BulletFiring</li>
+          <li>Gun</li>
+          <li>Sighted</li>
+          <li>BurstFire</li>
+          <li>LowStoppingPower</li>
+          <li>Attachable</li>
+        </weaponCategories>
+        <namerLabels>
+          <li>heavy SMG</li>
+          <li>SMG</li>
+          <li>chugger</li>
+        </namerLabels>
+      </li>
+    </comps>
+    <generateAllowChance>0</generateAllowChance>
+    <possessionCount>0</possessionCount>
+    <tradeability>Sellable</tradeability>
+    <thingSetMakerTags Inherit="False" >
+      <li>RewardStandardLowFreq</li>
+      <li>UniqueWeapon</li>
+    </thingSetMakerTags>
+    <recipeMaker Inherit="False" IsNull="True" />
+    <thingCategories Inherit="False">
+      <li>WeaponsUnique</li>
+    </thingCategories>
+    <descriptionHyperlinks>
+      <ThingDef>Gun_HeavySMG</ThingDef>
+    </descriptionHyperlinks>
+  </ThingDef>
+
+</Defs>

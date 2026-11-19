@@ -1,0 +1,189 @@
+{
+ "_provenance": {
+  "source": "device asset bundles, Data/Odyssey/Assets.zip, header-scanned",
+  "scanner": "~/.hermes/cache/scratch/m2_dds.json (BC/dxgi + mip scan of every entry)",
+  "note": "folder = the def <texPath>; file = the asset name inside the bundle (.dds container suffix removed)"
+ },
+ "textures": [
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGA.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGA_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGB.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGB_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGC.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGC_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGD.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGD_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGE.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/HeavySMG",
+   "file": "UniqueHeavySMGE_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverA.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverA_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverB.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverB_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverC.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverC_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverD.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverD_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverE.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 98,
+   "zip": "Data/Odyssey/Assets.zip"
+  },
+  {
+   "folder": "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver",
+   "file": "UniqueRevolverE_m.png",
+   "w": 128,
+   "h": 128,
+   "mips": 8,
+   "dxgi": 80,
+   "zip": "Data/Odyssey/Assets.zip"
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- iconexec: the icon chain of a unique weapon, EXECUTED.
+       dlls/Assembly-CSharp.dll is loaded and its own Graphic_Collection.Init,
+       Graphic_Random.SubGraphicFor, Graphic_Random.MatSingle and Widgets.GetIconFor run against
+       real def data (Odyssey Weapons_Unique.xml) and real texture dimensions (bundle scan).
+       UnityEngine is the minimal stub in Stub/ - see Stub/Unity.cs for why the shipped
+       dlls/UnityStubs.dll cannot be used head-less, and iconexec/UnityProbe for the proof. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>IconExec</AssemblyName>
+    <RootNamespace>IconExec</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Stub/**" />
+    <Compile Remove="UnityProbe/**" />
+    <ProjectReference Include="Stub/Stub.csproj" />
+    <Reference Include="Assembly-CSharp">
+      <HintPath>../dlls/Assembly-CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

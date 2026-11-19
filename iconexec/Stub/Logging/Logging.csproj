@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The engine's logger lives in its own assembly: Assembly-CSharp's TypeRef for
+       Brutal.Logging.LogCategory resolves against an AssemblyRef named 'Brutal.Core.Logging',
+       so the stub has to carry that assembly identity, not UnityStubs'. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Brutal.Core.Logging</AssemblyName>
+    <RootNamespace>Brutal.Logging</RootNamespace>
+    <AssemblyVersion>2026.9.0.0</AssemblyVersion>
+    <FileVersion>2026.9.0.0</FileVersion>
+    <Version>2026.9.0</Version>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+</Project>

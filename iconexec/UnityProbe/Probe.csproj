@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- UnityProbe: does the SHIPPED dlls/UnityStubs.dll work outside the game?
+       It is the real port, so the harness would rather use it than the stub in ../Stub. This probe
+       answers that question with the exact exception and the exact frame that raised it, and exits
+       non-zero only if the answer changes (i.e. the shipped stub starts working, which would make
+       the local stub unnecessary).
+
+       It references dlls/UnityStubs.dll directly - so it must stay a separate assembly from
+       IconExec, which must reference the stub of the same name. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>UnityProbe</AssemblyName>
+    <RootNamespace>UnityProbe</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityStubs">
+      <HintPath>$(DllDir)/UnityStubs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
