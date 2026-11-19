@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- iconflow: the "def -> icon texture" chain as plain functions.
+       No game runtime, no Unity, no Harmony, no GPU. Reads the shipped
+       dlls/Assembly-CSharp.dll for metadata + IL facts and drives a line-by-line
+       replica of Verse.Graphic_Collection.Init / Graphic_Random.SubGraphicFor
+       from those facts, so the replica cannot drift from the binary silently. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>IconFlow</AssemblyName>
+    <RootNamespace>IconFlow</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>
