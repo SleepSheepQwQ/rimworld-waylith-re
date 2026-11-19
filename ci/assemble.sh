@@ -9,6 +9,7 @@
 #   run/Rendering/Shaders/...        GLSL sources ShaderRegistry resolves by file name
 #   run/libsteam_api.so              stub so SteamManager.InitIfNeeded() does not Application.Quit()
 #   run/libwaylithaudio.so           stub so MiniAudioBackend.Initialize() resolves
+#   run/libstb.so                    stb_image compiled here: the PNG icons decode through it
 set -euo pipefail
 
 R="${1:-$PWD/run}"
@@ -21,6 +22,11 @@ cp "$REPO"/dlls/*.dll "$R"/
 cp -a "$REPO"/game/Data   "$R"/Data
 cp -a "$REPO"/game/Rendering "$R"/Rendering
 cp -a "$REPO"/game/Resources "$R"/RimWorld_Data/Resources
+
+# The texture loader's .dds path needs the port's native gli bridge (libgli.so), which lives in the
+# Android bundle and is not in dlls/. Convert the DDS corpus to PNG, which stb handles below.
+python3 "$REPO"/ci/dds_to_png.py "$R"/RimWorld_Data/Resources
+find "$R"/RimWorld_Data/Resources -name '*.dds' -delete
 
 APPHOST="$REPO"/ci/apphost/bin/Release/net10.0/RimWorld
 test -x "$APPHOST" || { echo "apphost missing: build ci/apphost first"; exit 1; }
@@ -36,6 +42,7 @@ cp "$HASHING" "$R"/
 
 gcc -shared -fPIC -O1 -o "$R"/libwaylithaudio.so "$REPO"/natives/waylithaudio_stub.c
 gcc -shared -fPIC -O1 -o "$R"/libsteam_api.so      "$REPO"/natives/steam_stub.c
+gcc -shared -fPIC -O1 -o "$R"/libstb.so            "$REPO"/natives/stb_shim.c -I/usr/include/stb
 
 # Deterministic mod list: Core + Odyssey (the unique-weapon defs live in Odyssey).
 CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"

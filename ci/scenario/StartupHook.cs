@@ -88,7 +88,17 @@ internal static class StartupHook
                 OverallRainfall.Normal, OverallTemperature.Normal, OverallPopulation.Normal,
                 LandmarkDensity.Normal);
             Console.Error.WriteLine($"[SCENARIO] world=OK tiles={Find.WorldGrid.TilesCount}");
-            Map map = MapGenerator.GenerateMap(new IntVec3(75, 1, 75), null, MapGeneratorDefOf.Base_Faction);
+
+            // Map.get_TileInfo() reads parent.Tile, and MapGenerator needs a parent that owns a real
+            // tile, so make the same world object the "pick a landing site" page makes.
+            PlanetTile tile = TileFinder.RandomStartingTile();
+            MapParent parent = (MapParent)WorldObjectMaker.MakeWorldObject(WorldObjectDefOf.Settlement);
+            parent.Tile = tile;
+            parent.SetFaction(Faction.OfPlayer);
+            Find.WorldObjects.Add(parent);
+            Console.Error.WriteLine($"[SCENARIO] parent={parent.def.defName} tile={tile} faction={parent.Faction?.Name}");
+
+            Map map = MapGenerator.GenerateMap(new IntVec3(75, 1, 75), parent, MapGeneratorDefOf.Base_Player);
             Current.Game.CurrentMap = map;
             mapResult = $"OK size={map.Size.x}x{map.Size.z} things={map.listerThings.AllThings.Count} " +
                         $"terrainCells={map.cellIndices.NumGridCells}";
@@ -130,11 +140,28 @@ internal static class StartupHook
             Material mat;
             Widgets.GetIconFor(target, out mat);
             bool bad = tex == null || tex == BaseContent.BadTex;
+            // A magenta 2x2 texture is Texture2D.CreatePlaceholder's decode-failure fallback, i.e. the
+            // def resolved but the file could not be decoded (missing native decoder, not a BadTex def).
+            string px = "<n/a>";
+            bool placeholder = false;
+            if (tex != null)
+            {
+                try
+                {
+                    Color32[] pixels = tex.GetPixels32();
+                    int opaque = pixels.Count(c => c.a > 0);
+                    Color32 first = pixels.Length > 0 ? pixels[0] : default(Color32);
+                    placeholder = tex.width <= 2 && tex.height <= 2;
+                    px = $"opaque={opaque}/{pixels.Length} px0=({first.r},{first.g},{first.b},{first.a})";
+                }
+                catch (Exception pex) { px = "pixels-unavailable: " + pex.GetType().Name; }
+            }
             iconResult = $"def={target.defName} tex={(tex == null ? "<null>" : tex.name)} " +
                          $"size={(tex == null ? "-" : tex.width + "x" + tex.height)} " +
-                         $"badTex={bad} uiIcon={(target.uiIcon == null ? "<null>" : target.uiIcon.name)} " +
+                         $"badTex={bad} placeholder={placeholder} {px} " +
+                         $"uiIcon={(target.uiIcon == null ? "<null>" : target.uiIcon.name)} " +
                          $"material={(mat == null ? "<null>" : mat.name)}";
-            ok = !bad;
+            ok = !bad && !placeholder;
         }
         catch (Exception ex)
         {

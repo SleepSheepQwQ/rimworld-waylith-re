@@ -32,8 +32,10 @@ own directory, which is how the game is started on the device too.
 | `Data/<DLC>/Defs` | the DefDatabase is empty without it | `game/Data/{Core,Royalty,Ideology,Biotech,Anomaly,Odyssey}` Defs + About + English keyed strings |
 | `RimWorld_Data/Resources/Textures/...` | `Resources.Load`/`LoadAll` read `<Application.dataPath>/Resources`; without it every `Graphic_Collection` logs "No textures found" and falls back to `BaseContent.BadGraphic` | four real DDS from `assets/iconpipe` (the unique revolver albedo + mask, the revolver and assault-rifle icons) |
 | `Config/ModsConfig.xml` | `ModLister.RebuildModList()` throws `Sequence contains no matching element` when no official mod can be found | `ci/ModsConfig.xml` (Core + Odyssey) written into the game's config folder before boot |
+| `libstb.so` | `.dds` icons are decoded through the port's native `gli` bridge (`Brutal.Gli` → `libgli.so`, a C shim over g-truc/gli with `load`, `loadFromMemory`, `extent`, `format`, `levels`, …). Without it `Texture2D.LoadFromFile` logs *"Substituting magenta placeholder"* and the icon is a 2×2 magenta texture | `natives/stb_shim.c` compiles `stb_image`/`stb_image_write` into `libstb.so`, and `ci/dds_to_png.py` converts the DDS corpus to PNG first (BC7 via Pillow, BC4 block-by-block, both already used by `pipe/`) |
+| name/backstory text | `PawnNameDatabaseShuffled`'s static ctor reads `Resources/Text/Names/*.txt`; `WorldGenerator` touches it, so world generation dies with a `TypeInitializationException` | `game/Resources/Text/Names` + `game/Resources/Backstories/Solid` (pulled out of the real `Assets.zip`) |
 
-No Vulkan loader, no Vulkan device, no GLFW, no ImGui, no `libbcdec`: `EngineApplication`'s
+No Vulkan loader, no Vulkan device, no GLFW, no ImGui: `EngineApplication`'s
 constructor returns immediately after the audio stub when `Options.Headless` is set, `Bootstrap`
 skips `ConfigureFrameRenderer`/`ConfigureTextureRuntime`, and `RunHeadlessLoop` is pure managed
 code. Textures stay CPU-side (`UnityStubs.Texture2D` wraps `Waylith.Rendering.Texture2D`), which is
@@ -47,10 +49,13 @@ enough for `Widgets.GetIconFor`.
 
 1. reports the loaded `DefDatabase<ThingDef>` size and every def carrying a `CompProperties_UniqueWeapon`;
 2. builds a real map — `Current.Game = new Game()`, `Scenario` from the `Crashlanded` ScenarioDef
-   (`WorldGrid.CreateRequiredLayers` reads `Find.Scenario`), `WorldGenerator.GenerateWorld`,
-   `MapGenerator.GenerateMap(75×75, MapGeneratorDefOf.Base_Faction)`;
-3. asks `Widgets.GetIconFor(def)` for `Gun_Revolver_Unique` and prints texture name, size and whether
-   it is `BaseContent.BadTex`, then `[SCENARIO] RESULT=OK|FAIL`.
+   (`WorldGrid.CreateRequiredLayers` reads `Find.Scenario`), `WorldGenerator.GenerateWorld`, then a
+   `Settlement` `MapParent` on `TileFinder.RandomStartingTile()` (a `null` parent makes
+   `Map.TileInfo` index `WorldGrid` out of range) and `MapGenerator.GenerateMap(75×75, parent,
+   MapGeneratorDefOf.Base_Player)`;
+3. asks `Widgets.GetIconFor(def)` for `Gun_Revolver_Unique` and prints texture name, size, whether it
+   is `BaseContent.BadTex`, whether it is the 2×2 magenta decode-failure placeholder, and the pixel
+   census (`GetPixels32()`: opaque count + first texel), then `[SCENARIO] RESULT=OK|FAIL`.
 
 `ci/report.py` is the gate: missing version line, missing `initialize finished`, non-zero exit code
 or `RESULT != OK` fail the job; the table it prints goes to the job summary, both full logs go to

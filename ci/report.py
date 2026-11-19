@@ -21,7 +21,14 @@ def read(path):
         return ""
 
 
-boot, scen = read(BOOT), read(SCEN)
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(text):
+    return ANSI.sub("", text)
+
+
+boot, scen = plain(read(BOOT)), plain(read(SCEN))
 
 init_ms = re.search(r"initialize finished\. Entry scene boot took (\d+)ms", boot)
 version = re.search(r"INFO RimWorld (\S+ rev\d+)", boot)
