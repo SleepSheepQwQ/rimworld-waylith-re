@@ -1,0 +1,90 @@
+name: residency
+
+# Texture2D.EnsureResident as an offline state machine: 48 states = GpuResource x CpuData x
+# PendingBuild x SourcePath x Cache. Every rule is gated on the IL of the shipped
+# dlls/Waylith.dll, so a dll that no longer has this shape fails BROKEN (exit 2), not green.
+# No game, no Unity, no GPU.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_fail:
+        description: 'add a deliberately failing assertion (control run; the job must go red)'
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'res/**'
+      - '.github/workflows/residency.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: residency-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  residency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Reference assembly
+        run: |
+          ls -l dlls/Waylith.dll
+          md5sum dlls/Waylith.dll
+
+      - name: Build
+        run: dotnet build res/Res.csproj -c Release -v minimal
+
+      - name: State machine + assertions
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p res/out
+          EXTRA=""
+          if [ "${{ inputs.force_fail }}" = "true" ]; then EXTRA="--force-fail"; fi
+          dotnet run --project res/Res.csproj -c Release --no-build -- \
+            --dlls dlls --table res/out/residency-table.md $EXTRA \
+            | tee res/out/residency.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## residency — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- force_fail: \`${{ inputs.force_fail || false }}\`"
+            echo "- dll: \`dlls/Waylith.dll\` ($(stat -c%s dlls/Waylith.dll) bytes, md5 \`$(md5sum dlls/Waylith.dll | cut -d' ' -f1)\`)"
+            echo ""
+            echo '```'
+            grep -E '^\[(FACT|BROKEN|STATE|ASSERT|SUMMARY|FINDING|PASS|FAIL|INFO)\]|^RESULT:' res/out/residency.log || true
+            echo '```'
+            echo ""
+            cat res/out/residency-table.md 2>/dev/null || echo "_no table produced_"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "job summary written: $(wc -c < "$GITHUB_STEP_SUMMARY") bytes"
+
+      - name: Print the failing assertions
+        if: failure()
+        run: |
+          echo "=== failed assertions ==="
+          grep -E '^\[(ASSERT|FAIL|BROKEN|FINDING)\]|^RESULT:' res/out/residency.log || true
+          echo "=== tail of the log ==="
+          tail -n 60 res/out/residency.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: residency-${{ github.run_id }}
+          path: |
+            res/out/residency-table.md
+            res/out/residency.log
+          if-no-files-found: warn

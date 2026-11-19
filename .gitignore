@@ -3,3 +3,4 @@ build/
 # dotnet build output (flowb and friends)
 **/bin/
 **/obj/
+res/out/
