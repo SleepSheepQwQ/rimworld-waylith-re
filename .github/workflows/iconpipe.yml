@@ -1,0 +1,100 @@
+name: iconpipe
+
+# End-to-end, offline proof of the icon chain, on GitHub's ubuntu x64 runners:
+#   real DDS (BC7 albedo / BC4 mask) -> CPU decode -> the real CutoutComplex + CutoutComplexUI
+#   fragment shaders on software Vulkan (lavapipe) -> pixel statistics -> assertions.
+# No game, no phone, no GPU. The job summary carries the table and every assertion.
+
+on:
+  workflow_dispatch:
+    inputs:
+      inject_fault:
+        description: 'Perturb one measured value to exercise the failure path'
+        type: choice
+        default: none
+        options: [none, coverage, color, luma]
+  push:
+    paths:
+      - 'pipe/**'
+      - 'assets/iconpipe/**'
+      - '.github/workflows/iconpipe.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iconpipe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pipe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan, shader and build tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential libvulkan-dev vulkan-tools \
+            mesa-vulkan-drivers glslang-tools python3-pip
+          python3 -m pip install --break-system-packages --quiet 'pillow==12.3.0'
+          python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
+      - name: Select the software Vulkan ICD
+        run: |
+          ICD=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -1)
+          if [ -z "$ICD" ]; then echo "no lavapipe ICD found"; ls -l /usr/share/vulkan/icd.d; exit 1; fi
+          echo "ICD=$ICD"
+          echo "VK_ICD_FILENAMES=$ICD" >> "$GITHUB_ENV"
+          vulkaninfo --summary | sed -n '1,40p'
+
+      - name: Decode, render and assert
+        run: |
+          set -o pipefail
+          python3 pipe/run_pipeline.py \
+            --inject-fault "${{ inputs.inject_fault || 'none' }}" \
+            --summary build/summary.md \
+            --json build/iconpipe-report.json 2>&1 | tee build/console.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## iconpipe — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- fault injected: \`${{ inputs.inject_fault || 'none' }}\`"
+            echo "- software ICD: \`${VK_ICD_FILENAMES:-unknown}\`"
+            echo ""
+            if [ -f build/summary.md ]; then
+              cat build/summary.md
+            else
+              echo "_pipeline produced no summary — see the failed step log_"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print the assertion diffs
+        if: failure()
+        run: |
+          echo "=== failed assertions (expected vs actual) ==="
+          if [ -f build/summary.md ]; then
+            sed -n '/^```$/,/^```$/p' build/summary.md
+          fi
+          if [ -f build/iconpipe-report.json ]; then
+            python3 -c 'import json;r=json.load(open("build/iconpipe-report.json"));print("run id:",r["run_id"]);[print("FAIL",c["id"],"expected",c["expected"],"got",c["actual"],c.get("detail","")) for c in r["checks"] if not c["ok"]]'
+          fi
+          echo "=== tail of console.log ==="
+          tail -n 80 build/console.log || true
+
+      - name: Upload renders, report and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iconpipe-${{ github.run_id }}
+          path: |
+            build/*.ppm
+            build/*.md
+            build/*.json
+            build/console.log
+          if-no-files-found: warn
