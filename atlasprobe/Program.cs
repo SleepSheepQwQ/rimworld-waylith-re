@@ -25,6 +25,8 @@ namespace AtlasProbe
         public static string Dir;
         public static readonly Dictionary<string, Assembly> ByName = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
         public static Assembly Waylith, CSharp, Unity;
+        public static readonly List<string> LoadErrors = new List<string>();
+        public static string UnityProbe;
 
         public static void Load(string dir)
         {
@@ -46,7 +48,8 @@ namespace AtlasProbe
             };
             foreach (var f in Directory.GetFiles(dir, "*.dll").OrderBy(x => x))
             {
-                try { var a = LoadFile(f); ByName[a.GetName().Name] = a; } catch { }
+                try { var a = LoadFile(f); ByName[a.GetName().Name] = a; }
+                catch (Exception e) { LoadErrors.Add(Path.GetFileName(f) + ": " + e.GetType().Name + ": " + e.Message); }
             }
             Waylith = Find("Waylith");
             CSharp = Find("Assembly-CSharp");
@@ -70,15 +73,22 @@ namespace AtlasProbe
 
         public static object Call(Type t, string name, params object[] args)
         {
+            // tolerate optional parameters: a method may declare more parameters than we pass
             var ms = t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
-                        .Where(m => m.Name == name && m.GetParameters().Length == args.Length).ToArray();
+                        .Where(m => m.Name == name
+                                    && m.GetParameters().Count(p => !p.IsOptional) <= args.Length
+                                    && m.GetParameters().Length >= args.Length).ToArray();
             Exception last = null;
             foreach (var m in ms)
             {
+                var ps = m.GetParameters();
+                int skip = m.IsStatic ? 0 : 1;
+                var full = new object[ps.Length];
+                for (int i = 0; i < ps.Length; i++)
+                    full[i] = i < args.Length - skip ? args[i + skip] : (ps[i].IsOptional ? ps[i].DefaultValue : null);
                 try
                 {
-                    return m.Invoke(m.IsStatic ? null : args[0],
-                                    m.IsStatic ? args : args.Skip(1).ToArray());
+                    return m.Invoke(m.IsStatic ? null : args[0], full);
                 }
                 catch (Exception e) { last = e; }
             }
@@ -135,16 +145,25 @@ namespace AtlasProbe
             c.Run();
 
             try { Engine.Load(dlls); } catch (Exception e) { R.Skip("reflection load: " + e.GetType().Name + ": " + e.Message); }
+            R.Real($"reflection: {Engine.ByName.Count} assemblies loaded, {Engine.LoadErrors.Count} failed");
+            foreach (var e in Engine.LoadErrors.Take(6)) R.Info("  load failure - " + e);
+            var unityT = Engine.T(null, "UnityEngine.Texture2D");
+            R.Real("UnityEngine.Texture2D resolves in: " + (unityT?.Assembly.GetName().Name ?? "<not loaded>"));
             FmtEnum = Engine.T(Engine.Waylith, "Waylith.Rendering.LoadedTextureFormat");
             PixelData = Engine.T(Engine.Waylith, "Waylith.Graphics.Textures.TexturePixelData");
             if (FmtEnum == null || PixelData == null) { R.L("[BROKEN] Waylith types not resolvable"); return 2; }
 
-            SectionFormats();
-            SectionSrgb();
-            SectionMipUpload();
-            SectionIl(c);
-            SectionAtlas();
-            SectionResidency();
+            void Sect(string name, Action a)
+            {
+                try { a(); }
+                catch (Exception e) { R.Skip(name + " threw " + e.GetType().Name + ": " + (e.InnerException ?? e).Message); }
+            }
+            Sect("SectionFormats", SectionFormats);
+            Sect("SectionSrgb", SectionSrgb);
+            Sect("SectionMipUpload", SectionMipUpload);
+            Sect("SectionIl", () => SectionIl(c));
+            Sect("SectionAtlas", SectionAtlas);
+            Sect("SectionResidency", SectionResidency);
 
             R.L();
             R.L($"assertions={R.Asserts} failed={R.Fails} skipped={R.Skips} facts={R.Facts} real_values={R.Reals}");
