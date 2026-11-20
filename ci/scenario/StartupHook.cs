@@ -97,9 +97,14 @@ internal static class StartupHook
         Console.Error.WriteLine($"{T} uniqueWeaponDefs={uniques.Count} " +
                                 string.Join(",", uniques.Take(8).Select(d => d.defName)));
 
-        _target = uniques.FirstOrDefault(d => d.defName == "Gun_Revolver_Unique")
-                  ?? uniques.FirstOrDefault()
-                  ?? DefDatabase<ThingDef>.GetNamedSilentFail("Gun_Revolver");
+        // The extension-leak run points the same scenario at a def a generated mod carries.
+        // Unset (the normal job) keeps the shipped-Odyssey selection exactly as before.
+        string requested = Environment.GetEnvironmentVariable("SCENARIO_DEF");
+        _target = !string.IsNullOrEmpty(requested)
+            ? DefDatabase<ThingDef>.GetNamedSilentFail(requested)
+            : uniques.FirstOrDefault(d => d.defName == "Gun_Revolver_Unique")
+              ?? uniques.FirstOrDefault()
+              ?? DefDatabase<ThingDef>.GetNamedSilentFail("Gun_Revolver");
         if (_target == null)
         {
             Console.Error.WriteLine($"{T} RESULT=FAIL failed=no-target-def");
@@ -184,6 +189,17 @@ internal static class StartupHook
             Console.Error.WriteLine($"{T} map=OK size={map.Size.x}x{map.Size.z} things={map.listerThings.AllThings.Count} " +
                                     $"cells={map.cellIndices.NumGridCells} parent={map.Parent?.def?.defName ?? "<null>"} " +
                                     $"biome={map.Biome?.defName} programState={Current.ProgramState} t={Sec():F1}s");
+
+            // The extension-leak experiment runs on the same real map and the same
+            // Widgets.GetIconFor path, but asserts the defect instead of the healthy layout.
+            if (Environment.GetEnvironmentVariable("SCENARIO_LEAK") == "1")
+            {
+                Failed.AddRange(LeakSweep.Run(map, OutDir));
+                Console.Error.WriteLine($"{T} RESULT={(Failed.Count == 0 ? "OK" : "FAIL")}" +
+                                        (Failed.Count == 0 ? "" : " failed=" + string.Join(",", Failed)));
+                Quit();
+                return;
+            }
 
             Thing thing = ThingMaker.MakeThing(_target);
             var twc = thing as ThingWithComps;
@@ -645,7 +661,7 @@ internal static class StartupHook
     }
 
     /// <summary>Writes Texture2D.GetPixels32() (bottom-up, Unity convention) as a top-down RGBA8 PNG.</summary>
-    private static void WritePng(string path, int w, int h, Color32[] pixels)
+    internal static void WritePng(string path, int w, int h, Color32[] pixels)
     {
         var raw = new byte[h * (1 + w * 4)];
         int o = 0;

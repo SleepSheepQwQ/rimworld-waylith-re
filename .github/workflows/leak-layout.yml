@@ -1,0 +1,141 @@
+name: leak-layout
+
+# Reproduces the "asset name keeps .png" layout with a generated minimal mod and
+# runs the same real headless host / map / Widgets.GetIconFor path as headless.yml.
+#
+#   LeakExt   : UniqueRevolverA..E.png.png (+ A..E_m.png.png)  -> asset names keep .png
+#   LeakPlain : UniqueRevolverA..E.png     (+ A..E_m.png)      -> control, names are stripped
+#
+# ci/scenario/LeakSweep.cs prints the subGraphics table and the id 0..19 sweep,
+# measures coverage / meanRGB / edge structure per icon, and asserts that with
+# n=10 exactly half the ids land on an _m mask that is ~100% covered and flat.
+# ci/report.py is the gate: any assert=... ok=false line fails the job.
+
+on:
+  push:
+    paths:
+      - 'ci/leakmod/**'
+      - 'ci/make_leak_mod.py'
+      - 'ci/ModsConfig.leak.xml'
+      - 'ci/scenario/**'
+      - '.github/workflows/leak-layout.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leak-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  leak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          dotnet --version
+          gcc --version | head -1
+          uname -srm
+
+      - name: Texture tooling (stb headers for libstb.so, Pillow for the DDS->PNG step)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          ls /usr/include/stb
+          python3 -m pip install --break-system-packages --quiet pillow
+          python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
+      - name: Build the apphost and the scenario hook
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build ci/scenario/Scenario.csproj -c Release -v minimal
+
+      - name: Assemble the game directory
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" | tee out/assemble.log
+
+      - name: Generate the minimal extension-leak mod
+        run: |
+          set -euo pipefail
+          python3 ci/make_leak_mod.py --run "$PWD/run" | tee out/leakmod.txt
+
+      - name: Activate Core + Odyssey + the generated mod
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          cp ci/ModsConfig.leak.xml "$CFG/ModsConfig.xml"
+          cat "$CFG/ModsConfig.xml"
+
+      - name: 1) boot only
+        run: |
+          set -euo pipefail
+          RUN_DIR="$PWD/run" bash ci/run.sh "$PWD/out/boot.log" -QuitAfterBoot -Verbose
+
+      - name: 2) boot + extension-leak sweep (real map -> GetIconFor -> pixels)
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/ci/scenario/bin/Release/net10.0/HeadlessScenario.dll"
+          export SCENARIO_OUT="$PWD/out"
+          export SCENARIO_DEF="Gun_Revolver_LeakExt"
+          export SCENARIO_LEAK="1"
+          BOOT_TIMEOUT=420 RUN_DIR="$PWD/run" bash ci/run.sh "$PWD/out/leak.log" -Verbose
+
+      - name: Report + gate
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 ci/report.py out/boot.log out/leak.log out/summary.md | tee out/report.txt
+          cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -f out/leak_table.md ]; then
+            {
+              echo ""
+              echo "### extension-leak sweep (id 0..19)"
+              cat out/leak_table.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Failure details
+        if: failure()
+        run: |
+          echo "=== leak.log: scenario lines ==="
+          grep -aE '^\[SCENARIO\]' out/leak.log | tail -n 160 || true
+          echo "=== leak.log tail ==="
+          tail -n 80 out/leak.log || true
+
+      - name: Upload logs, table and icon PNGs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leak-layout-${{ github.run_id }}
+          path: |
+            out/*.log
+            out/*.md
+            out/*.txt
+            out/*.png
+            out/icon.json
+          if-no-files-found: warn
+
+      - name: Upload the player log and crash reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leak-layout-playerlog-${{ github.run_id }}
+          path: |
+            /home/runner/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Logs/Player.log
+            /home/runner/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Crashes/*.txt
+            /home/runner/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml
+          if-no-files-found: warn

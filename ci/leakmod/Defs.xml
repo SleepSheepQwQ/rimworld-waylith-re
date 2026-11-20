@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <!-- The control: ordinary loose .png files. ModContentLoader.LoadTexture sets
+       name = Path.GetFileNameWithoutExtension(file.Name), so "X.png" becomes "X":
+       the _m masks are filtered by Graphic_Collection.Init and n stays 5. -->
+  <ThingDef ParentName="Gun_Revolver">
+    <defName>Gun_Revolver_LeakPlain</defName>
+    <label>revolver (loose png control)</label>
+    <description>Control def: the ten textures are ordinary X.png files.</description>
+    <graphicData>
+      <texPath>Things/Item/Equipment/WeaponRanged/UniqueWeapons/LeakPlain</texPath>
+      <graphicClass>Graphic_Random</graphicClass>
+      <shaderType>CutoutComplex</shaderType>
+    </graphicData>
+  </ThingDef>
+
+  <!-- The reproduction: the file name carries an inner .png, so the one extension
+       the loader peels is the outer one and the texture is named "X.png". -->
+  <ThingDef ParentName="Gun_Revolver">
+    <defName>Gun_Revolver_LeakExt</defName>
+    <label>revolver (extension leak)</label>
+    <description>Reproduction def: the ten textures are X.png.png files, so their asset names keep .png.</description>
+    <graphicData>
+      <texPath>Things/Item/Equipment/WeaponRanged/UniqueWeapons/LeakExt</texPath>
+      <graphicClass>Graphic_Random</graphicClass>
+      <shaderType>CutoutComplex</shaderType>
+    </graphicData>
+  </ThingDef>
+</Defs>

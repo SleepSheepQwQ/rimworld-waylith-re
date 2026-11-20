@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Deterministic mod list for the extension-leak run. Core + Odyssey are the same
+     two mods the normal headless job uses; WaylithLeakRepro is generated after
+     ci/assemble.sh has built run/ and lives in run/Mods/WaylithLeakRepro. -->
+<ModsConfigData>
+  <version>1.7.4990 rev1069</version>
+  <activeMods>
+    <li>ludeon.rimworld</li>
+    <li>ludeon.rimworld.odyssey</li>
+    <li>waylith.leakrepro</li>
+  </activeMods>
+  <knownExpansions>
+    <li>ludeon.rimworld.odyssey</li>
+  </knownExpansions>
+</ModsConfigData>
