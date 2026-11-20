@@ -1,0 +1,144 @@
+name: atlaspreload
+
+# AtlasPreloadFix: prove the pre-bake selection and measure what it costs to boot.
+#
+#   probe     real Assembly-CSharp/UnityStubs, no game and no GPU: a sentinel-resident texture and
+#             a texture that cannot be resident go through the policy and through the shipped
+#             BuildMeshesForUvs tile map. The bad one must be absent; an unfiltered control atlas
+#             must still register it, otherwise the assertion would be vacuous.
+#   boot      the real headless host, two control boots and two patched boots, plus one unbounded
+#             probe run. wall_seconds comes from ci/run.sh; [ATLASFIX] lines carry the page and tile
+#             counts. The headless host has no GpuTextureService, so every live residency probe
+#             fails there; the patch's all-failed guard must leave those pages untouched (this is
+#             also the safety property that keeps an unavailable probe from emptying an atlas).
+
+on:
+  push:
+    paths:
+      - 'atlaspreload/**'
+      - '.github/workflows/atlaspreload.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlaspreload-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  atlaspreload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost, mod and offline probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build atlaspreload/AtlasPreloadFix.csproj -c Release -v minimal
+          dotnet build atlaspreload/probe/AtlasPreloadProbe.csproj -c Release -v minimal
+
+      - name: Probe the policy on the shipped types (no game, no GPU)
+        run: |
+          set -o pipefail
+          mkdir -p out
+          dotnet atlaspreload/probe/bin/Release/AtlasPreloadProbe.dll --dlls "$PWD/dlls" \
+            | tee out/probe.log
+
+      - name: Assemble the game directory
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log
+
+      - name: Boot control twice
+        run: |
+          set -euo pipefail
+          for i in 1 2; do
+            RUN_DIR="$PWD/run" BOOT_TIMEOUT=300 bash ci/run.sh "$PWD/out/boot_control_$i.log" \
+              -QuitAfterBoot -Verbose
+          done
+
+      - name: Install AtlasPreloadFix and boot patched twice + one unbounded probe
+        run: |
+          set -euo pipefail
+          mkdir -p run/Mods/AtlasPreloadFix/Assemblies
+          cp atlaspreload/bin/Release/AtlasPreloadFix.dll run/Mods/AtlasPreloadFix/Assemblies/
+          cp atlaspreload/About/About.xml run/Mods/AtlasPreloadFix/About.xml
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          sed -i 's#</activeMods>#  <li>sleepsheep.waylith.atlaspreloadfix</li>\n  </activeMods>#' "$CFG/ModsConfig.xml"
+          grep -n 'atlaspreloadfix' "$CFG/ModsConfig.xml"
+
+          for i in 1 2; do
+            ATLASFIX_SELFTEST=1 ATLASFIX_BUDGET_MS=250 \
+              RUN_DIR="$PWD/run" BOOT_TIMEOUT=300 bash ci/run.sh "$PWD/out/boot_fix_$i.log" \
+              -QuitAfterBoot -Verbose
+          done
+
+          # No budget: measure the raw warm-up cost, even if it exceeds the production threshold.
+          ATLASFIX_SELFTEST=1 ATLASFIX_BUDGET_MS=0 \
+            RUN_DIR="$PWD/run" BOOT_TIMEOUT=300 bash ci/run.sh "$PWD/out/boot_fix_unbounded.log" \
+            -QuitAfterBoot -Verbose
+
+      - name: Collect [ATLASFIX] evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          for f in out/boot_fix_1.log out/boot_fix_2.log out/boot_fix_unbounded.log; do
+            echo "=== $f ==="
+            grep -aE '^\[ATLASFIX\]|wall_seconds=|exit_code=' "$f" | head -80 || true
+          done
+
+      - name: Gate
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 atlaspreload/gate.py out | tee out/gate.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## atlaspreload — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo '```'
+            cat out/gate.txt 2>/dev/null || echo "_no gate output_"
+            echo ""
+            grep -aE '^\[ATLASFIX\]' out/boot_fix_1.log 2>/dev/null | head -40 || true
+            echo ""
+            grep -aE '^\[ATLASFIX\]' out/boot_fix_unbounded.log 2>/dev/null | tail -20 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Failure details
+        if: failure()
+        run: |
+          echo "=== probe log ==="
+          cat out/probe.log 2>/dev/null || true
+          echo "=== fix 1 tail ==="
+          tail -n 120 out/boot_fix_1.log 2>/dev/null || true
+          grep -aE '^\[ATLASFIX\]' out/boot_fix_1.log 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: atlaspreload-${{ github.run_id }}
+          path: |
+            out/*.log
+            out/*.txt
+          if-no-files-found: warn

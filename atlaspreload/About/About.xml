@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>AtlasPreloadFix</name>
+  <author>SleepSheepQwQ</author>
+  <packageId>sleepsheep.waylith.atlaspreloadfix</packageId>
+  <modVersion>1.0.0</modVersion>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+  <description>Pre-bake residency selection for the Waylith static texture atlas.
+
+Before StaticTextureAtlas packs a page, every member of that page is asked for a GPU-resident
+texture once. Textures that fail are removed from the page's input list, so they never get a
+StaticTextureAtlasTile and Graphic.TryGetTextureAtlasReplacementInfo keeps using the source texture
+instead of replacing it with an empty atlas tile. The source texture is also left out of the atlas
+eviction set, so it can still be loaded on demand.
+
+A startup budget (ATLASFIX_BUDGET_MS, default 250 ms) abandons the pre-pass and leaves the page
+untouched if probing is too expensive. If every probe on a page fails (for example a host with no
+GPU service), the page is likewise left untouched instead of being emptied.
+
+This is not a per-tile repair: the selection happens once, on the complete page input, before
+BuildMeshesForUvs runs.</description>
+</ModMetaData>
