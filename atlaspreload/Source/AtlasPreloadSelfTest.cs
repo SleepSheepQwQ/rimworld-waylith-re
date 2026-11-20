@@ -161,7 +161,8 @@ namespace AtlasPreloadFix
             try
             {
                 object core = typeof(Texture2D)
-                    .GetProperty("CoreTexture", BindingFlags.Public | BindingFlags.Instance)
+                    .GetProperty("CoreTexture",
+                        BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
                     ?.GetValue(texture);
                 if (core == null)
                 {
