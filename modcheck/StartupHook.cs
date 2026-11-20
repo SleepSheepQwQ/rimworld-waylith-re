@@ -185,7 +185,24 @@ internal static class StartupHook
                     try
                     {
                         Texture2D t = ContentFinder<Texture2D>.Get(key, false);
-                        Console.WriteLine($"{T} dds leaf={leaf} hit={(t != null)} name='{(t != null ? t.name : "-")}' size={(t != null ? t.width + "x" + t.height : "-")}");
+                        string stats = "-";
+                        if (t != null && t.width > 1 && t.height > 1)
+                        {
+                            try
+                            {
+                                Color32[] px = t.GetPixels32();
+                                double r = 0, g = 0, b = 0; int opaque = 0;
+                                foreach (Color32 c in px)
+                                {
+                                    r += c.r; g += c.g; b += c.b;
+                                    if (c.a > 8) opaque++;
+                                }
+                                if (px.Length > 0)
+                                    stats = $"meanRGB=({r / px.Length:F1},{g / px.Length:F1},{b / px.Length:F1}) opaque={100.0 * opaque / px.Length:F1}%";
+                            }
+                            catch (Exception e) { stats = "px!" + e.GetType().Name; }
+                        }
+                        Console.WriteLine($"{T} dds leaf={leaf} hit={(t != null)} name='{(t != null ? t.name : "-")}' size={(t != null ? t.width + "x" + t.height : "-")}' {stats}");
                     }
                     catch (Exception e)
                     {
