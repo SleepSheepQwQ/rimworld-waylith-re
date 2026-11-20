@@ -198,34 +198,37 @@ namespace AtlasFix
         {
             if (target == null) return null;
             Type t = target.GetType();
-            var f = t.GetField(member, Any) ?? t.GetField(member, AnyStatic);
-            if (f != null) return f.GetValue(f.IsStatic ? null : target);
-            var p = t.GetProperty(member, Any);
+            var f = t.GetFields(Any).FirstOrDefault(x => x.Name == member);
+            if (f != null) return f.GetValue(target);
+            var p = t.GetProperties(Any).FirstOrDefault(x => x.Name == member && x.GetIndexParameters().Length == 0);
             return p?.GetValue(target, null);
         }
 
         public static object GetS(Type t, string member)
         {
             if (t == null) return null;
-            var f = t.GetField(member, AnyStatic) ?? t.GetField(member, Any);
+            var f = t.GetFields(AnyStatic).FirstOrDefault(x => x.Name == member);
             if (f != null) return f.GetValue(null);
-            var p = t.GetProperty(member, AnyStatic);
+            var p = t.GetProperties(AnyStatic).FirstOrDefault(x => x.Name == member && x.GetIndexParameters().Length == 0);
             return p?.GetValue(null, null);
         }
 
         public static void Set(object target, string member, object value)
         {
             Type t = target.GetType();
-            var f = t.GetField(member, Any);
+            var f = t.GetFields(Any).FirstOrDefault(x => x.Name == member);
             if (f != null) { f.SetValue(target, value); return; }
-            t.GetProperty(member, Any)?.SetValue(target, value, null);
+            t.GetProperties(Any).FirstOrDefault(x => x.Name == member && x.GetIndexParameters().Length == 0)
+                ?.SetValue(target, value, null);
         }
 
         public static void SetS(Type t, string member, object value)
         {
-            var f = t.GetField(member, AnyStatic);
+            if (t == null) return;
+            var f = t.GetFields(AnyStatic).FirstOrDefault(x => x.Name == member);
             if (f != null) { f.SetValue(null, value); return; }
-            t.GetProperty(member, AnyStatic)?.SetValue(null, value, null);
+            t.GetProperties(AnyStatic).FirstOrDefault(x => x.Name == member && x.GetIndexParameters().Length == 0)
+                ?.SetValue(null, value, null);
         }
 
         public static bool Has(Type t, string member)
@@ -984,7 +987,7 @@ namespace AtlasFix
         {
             try
             {
-                var gen = Engine.T("Verse.GenTexture");
+                var gen = Engine.T("Verse.GenTexture") ?? Engine.TSimple("GenTexture");
                 var m = gen == null ? null : R.M(gen, "GenerateMipmaps", 4);
                 if (m == null || Engine.Harmony == null)
                 {
