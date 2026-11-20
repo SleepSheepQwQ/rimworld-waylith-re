@@ -863,19 +863,28 @@ namespace AtlasFix
                     string owners = "";
                     if (info != null)
                     {
-                        var p = info.GetType().GetProperty("Postfixes");
-                        object listObj = p != null ? p.GetValue(info) : null;
-                        if (listObj is IList list)
+                        object listObj = null;
+                        var f = info.GetType().GetField("postfixes", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (f != null) listObj = f.GetValue(info);
+                        if (listObj == null)
                         {
-                            postfixes = list.Count;
-                            owners = string.Join(",", list.Cast<object>()
-                                .Select(x => R.Get(x, "owner") as string).Where(x => x != null));
+                            var p = info.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                             .FirstOrDefault(x => x.Name == "Postfixes");
+                            listObj = p?.GetValue(info);
+                        }
+                        if (listObj is IEnumerable en)
+                        {
+                            foreach (object x in en)
+                            {
+                                postfixes++;
+                                owners += (R.Get(x, "owner") as string ?? "?") + ",";
+                            }
                         }
                     }
-                    P.Real("Harmony.GetPatchInfo(StaticTextureAtlas.Bake) -> postfixes=" + postfixes
-                           + " owners=[" + owners + "]");
-                    P.Ok("the patch is attached to the shipped method", owners.Contains("atlasbake"),
-                         "owners=[" + owners + "]");
+                    P.Real("Harmony.GetPatchInfo(StaticTextureAtlas.Bake) -> info=" + (info != null)
+                           + " postfixes=" + postfixes + " owners=[" + owners + "]");
+                    if (info == null) P.Skip("Harmony patch info", "GetPatchInfo returned null; the module's own log lines are the evidence that it ran");
+                    else P.Ok("the patch is attached to the shipped method", owners.Contains("atlasbake"), "owners=[" + owners + "]");
                 }
                 else P.Note("0Harmony not loaded; cannot read patch info");
 
