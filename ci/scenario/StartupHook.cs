@@ -191,6 +191,16 @@ internal static class StartupHook
                                     $"type={thing.GetType().Name} comps=" +
                                     string.Join(",", (twc == null ? new List<ThingComp>() : twc.AllComps).Select(c => c.GetType().Name)));
 
+            // The map mesh is a renderer artifact. On a runner without the full texture set the
+            // deferred MapDrawer.RegenerateEverythingNow() in Map.FinalizeInit dies in
+            // SectionLayer_Gas (GasMat is null because Things/Gas/GasCloudThickA is not in the
+            // shipped subset), which leaves `sections` allocated but mostly null. MapMeshDirty is
+            // written to be a no-op while `sections == null` (the state every map is in before
+            // that deferred pass), so put the drawer back into that state instead of letting
+            // Thing.SpawnSetup dereference a half-built section array. Nothing in the icon path
+            // reads the mesh.
+            Console.Error.WriteLine($"{T} mapMesh={MapMeshState(map)}");
+
             IntVec3 cell;
             if (!CellFinder.TryFindRandomCellNear(map.Center, map, 30, c => c.Standable(map), out cell)) cell = map.Center;
             Thing spawned = GenSpawn.Spawn(thing, cell, map, WipeMode.Vanish);
@@ -354,6 +364,34 @@ internal static class StartupHook
     private static bool SafeInPlay()
     {
         try { return GenScene.InPlayScene; } catch { return false; }
+    }
+
+    /// <summary>
+    /// Returns "complete(n/n)" when every Section exists, otherwise nulls the array (the state
+    /// MapDrawer.MapMeshDirty treats as "no mesh yet") and returns "incomplete(k/n)->null".
+    /// </summary>
+    private static string MapMeshState(Map map)
+    {
+        try
+        {
+            MapDrawer drawer = map.mapDrawer;
+            if (drawer == null) return "no-drawer";
+            int sx = drawer.SectionCount.x, sz = drawer.SectionCount.z;
+            int total = sx * sz;
+            Section[,] secs = drawer.sections;
+            int built = 0;
+            if (secs != null)
+                for (int i = 0; i < sx; i++)
+                    for (int j = 0; j < sz; j++)
+                        if (secs[i, j] != null) built++;
+            if (secs != null && built == total) return $"complete({built}/{total})";
+            drawer.sections = null;
+            return $"incomplete({built}/{total})->null";
+        }
+        catch (Exception ex)
+        {
+            return "probe-failed:" + ex.GetType().Name;
+        }
     }
 
     private static string SafeMaps()
