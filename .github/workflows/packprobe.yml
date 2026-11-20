@@ -1,0 +1,85 @@
+name: packprobe
+
+# Asks the shipped VFS what names it produces for the real asset packs.
+#
+# The packs in packprobe/pack are copied verbatim out of the device install, so the entries keep
+# their shipped names:
+#
+#   Core    Resources/Textures/Things/Pawn/Animal/Ibex/IbexMale_north.psd.dds.split
+#   Odyssey Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver/UniqueRevolverA.png.dds
+#
+# The hook then calls ContentFinder<Texture2D>.GetAllInFolder / .Get and GraphicDatabase +
+# Graphic_Multi.MatAt(rot) — the exact calls Graphic_* makes — and prints what comes back. This is
+# ground truth for the naming question, not a re-implementation: if a name is mangled, the miss shows
+# up here as hit=False.
+on:
+  push:
+    paths:
+      - 'packprobe/**'
+      - 'dlls/**'
+      - 'ci/**'
+      - 'game/**'
+      - 'natives/**'
+      - '.github/workflows/packprobe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packprobe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost + probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build packprobe/PackProbe.csproj -c Release -v minimal
+
+      - name: Assemble the game directory, then drop the real packs in
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run"
+          cp packprobe/pack/Assets.zip  "$PWD/run/Assets.zip"
+          mkdir -p "$PWD/run/Data/Odyssey"
+          cp packprobe/pack/Odyssey.zip "$PWD/run/Data/Odyssey/Assets.zip"
+          ls -l "$PWD/run/Assets.zip" "$PWD/run/Data/Odyssey/Assets.zip"
+
+      - name: Probe the packs
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/packprobe/bin/Release/net10.0/PackProbe.dll"
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces -Verbose > "$PWD/out/vfs.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[VFS\]' "$PWD/out/vfs.log" | tee "$PWD/out/vfs.txt" || true
+          echo "--- boot markers ---"
+          grep -aiE 'asset pack|initialize finished|ModsConfig' "$PWD/out/vfs.log" | head -10 || true
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packprobe-${{ github.run_id }}
+          path: |
+            out/vfs.log
+            out/vfs.txt
+          if-no-files-found: warn
