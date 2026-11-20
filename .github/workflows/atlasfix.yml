@@ -66,7 +66,15 @@ jobs:
           md5sum gf/mod/bin/Release/net10.0/GlyphFix.dll
 
       - name: Build the probe
-        run: dotnet build atlasfix/AtlasFix.csproj -c Release -v minimal
+        run: |
+          set -euo pipefail
+          dotnet build atlasfix/AtlasFix.csproj -c Release -v minimal
+          # ShaderRegistry's static ctor reads <AppContext.BaseDirectory>/Rendering/Shaders; without it
+          # Shader.Find throws inside Bake long before the blit loop and the probe would measure that
+          # instead of the atlas.
+          mkdir -p atlasfix/bin/Release/net10.0/Rendering
+          cp -r game/Rendering/Shaders atlasfix/bin/Release/net10.0/Rendering/
+          find atlasfix/bin/Release/net10.0/Rendering -name '*.glsl' | head
 
       - name: Software Vulkan, GLFW and a virtual display
         run: |

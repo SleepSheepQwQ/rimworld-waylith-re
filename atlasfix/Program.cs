@@ -427,6 +427,17 @@ namespace AtlasFix
             }
             catch (Exception e) { P.Note("UnityData: " + e.Message); }
 
+            try
+            {
+                // Bake resolves Custom/BlitExact through Shader.Find -> Resources -> ShaderRegistry,
+                // whose static ctor loads <AppContext.BaseDirectory>/Rendering/Shaders. Warm it here so
+                // a missing shader tree shows up as this line and not as a Bake exception.
+                var shaderT = Engine.T("UnityEngine.Shader");
+                object sh = R.Invoke(R.M(shaderT, "Find", 1), null, new object[] { "Custom/BlitExact" });
+                P.Real("Shader.Find(\"Custom/BlitExact\") = " + (sh == null ? "null (Bake's material is deferred; the blit path is vkCmdBlitImage and never compiles it)" : "resolved"));
+            }
+            catch (Exception e) { P.Note("Shader.Find warm-up: " + Ex(e)); }
+
             P.Fact("Bake() runs BuildMeshesForUvs (tiles.Add for every texture) before any blit — static.cs:164-171");
             P.Fact("BlitTexturesToColorAtlas clears the page to Color.clear and calls Graphics.DrawTexture per tile — static.cs:474-492");
             P.Fact("DrawTexture's source gate is `GpuTexture != null` after EnsureGpuResident(); on failure it calls StubWarner.LogStub and returns — UnityStubs Graphics.cs:560-596");
@@ -544,7 +555,7 @@ namespace AtlasFix
             }
             catch (Exception e)
             {
-                P.Note("EnsureGpuResident('" + Name(tex) + "'): " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                P.Note("EnsureGpuResident('" + Name(tex) + "'): " + Ex(e));
                 return false;
             }
         }
@@ -621,8 +632,7 @@ namespace AtlasFix
                 }
                 catch (Exception e)
                 {
-                    var inner = e.InnerException ?? e;
-                    r.Threw = inner.GetType().Name + ": " + inner.Message;
+                    r.Threw = Ex(e);
                     P.Note(label + ": Bake threw " + r.Threw);
                 }
 
@@ -711,7 +721,7 @@ namespace AtlasFix
             }
             catch (Exception e)
             {
-                r.PixelNote = "readback failed: " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message);
+                r.PixelNote = "readback failed: " + Ex(e);
             }
         }
 
@@ -764,7 +774,7 @@ namespace AtlasFix
             }
             catch (Exception e)
             {
-                h.Note = e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message);
+                h.Note = Ex(e);
                 P.Note("replacement info: " + h.Note);
             }
             return h;
@@ -777,7 +787,8 @@ namespace AtlasFix
             if (texture == null) return false;
             try
             {
-                object mat = R.Invoke(R.M(_matPool, "MatFrom", 1), null, new object[] { texture });
+                var matFrom = R.MExact(_matPool, "MatFrom", "Texture2D") ?? R.M(_matPool, "MatFrom", 1);
+                object mat = R.Invoke(matFrom, null, new object[] { texture });
                 if (mat == null)
                 {
                     if (!_printedMatError) { _printedMatError = true; P.Note("MaterialPool.MatFrom returned null for " + label); }
@@ -805,7 +816,7 @@ namespace AtlasFix
                 if (!_printedMatError)
                 {
                     _printedMatError = true;
-                    P.Note("replacement info(" + label + "): " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                    P.Note("replacement info(" + label + "): " + Ex(e));
                 }
                 return false;
             }
@@ -874,7 +885,7 @@ namespace AtlasFix
             }
             catch (Exception e)
             {
-                P.L("[FAIL] install GlyphFix: " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                P.L("[FAIL] install GlyphFix: " + Ex(e));
                 return false;
             }
         }
@@ -951,13 +962,13 @@ namespace AtlasFix
                         R.Invoke(m, null, m.GetParameters().Length == 2 ? new object[] { device, 2 } : new object[] { device });
                         P.Gpu("  " + name + ".Configure ok");
                     }
-                    catch (Exception e) { P.Gpu("  " + name + ".Configure failed: " + (e.InnerException?.Message ?? e.Message)); }
+                    catch (Exception e) { P.Gpu("  " + name + ".Configure failed: " + Ex(e)); }
                 }
                 return true;
             }
             catch (Exception e)
             {
-                P.Skip("device", e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                P.Skip("device", Ex(e));
                 return false;
             }
         }
@@ -999,7 +1010,8 @@ namespace AtlasFix
                 var hmType = Engine.Harmony.GetType("HarmonyLib.HarmonyMethod");
                 object h = Activator.CreateInstance(htype, new object[] { "atlasfix.harness.mipnoop" });
                 object hm = Activator.CreateInstance(hmType, new object[] { typeof(Program).GetMethod(nameof(SkipMip), BindingFlags.Static | BindingFlags.NonPublic) });
-                var patch = htype.GetMethods().First(x => x.Name == "Patch" && x.GetParameters()[0].ParameterType == typeof(MethodInfo));
+                var patch = htype.GetMethods().First(x => x.Name == "Patch" && x.GetParameters().Length >= 2
+                                                       && typeof(MethodBase).IsAssignableFrom(x.GetParameters()[0].ParameterType));
                 var ps = patch.GetParameters();
                 var args = new object[ps.Length];
                 args[0] = m;
@@ -1010,7 +1022,7 @@ namespace AtlasFix
             }
             catch (Exception e)
             {
-                P.Note("mip no-op failed: " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                P.Note("mip no-op failed: " + Ex(e));
             }
         }
 
@@ -1023,6 +1035,17 @@ namespace AtlasFix
                 try { return Enum.Parse(t, n, ignoreCase: true); } catch { }
             }
             throw new ArgumentException("none of [" + string.Join(",", names) + "] exist on " + t.FullName);
+        }
+
+        internal static string Ex(Exception e)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (Exception x = e; x != null; x = x.InnerException)
+            {
+                if (sb.Length > 0) sb.Append(" <- ");
+                sb.Append(x.GetType().Name).Append(": ").Append(x.Message);
+            }
+            return sb.ToString();
         }
 
         static string Argv(string[] argv, string name)
