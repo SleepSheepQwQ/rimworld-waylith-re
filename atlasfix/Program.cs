@@ -1,0 +1,1020 @@
+// AtlasFix - does StaticTextureAtlas.Bake keep a tile for a texture that never reached the page,
+// and does the GlyphFix atlasbake postfix remove it?
+//
+// This probe runs the SHIPPED managed assemblies (dlls/*.dll) - no re-implementation of Bake, no
+// re-implementation of the residency gate. Three layers of evidence:
+//
+//   [FACT]  a statement read out of the decompiled/IL form of the shipped code, with file:line
+//   [REAL]  a value produced by executing a shipped method (reflection)
+//   [GPU]   a value read back from a real Vulkan device (llvmpipe in CI); absent without a device
+//
+// With --gpu the same run also creates a real graphics device (GLFW window surface + lavapipe), so
+// the blits are real: the atlas page is read back and each tile's cell is counted. Without it the
+// device-less environment makes every texture non-resident, which is only useful as the negative
+// control ("nothing can be baked"); the positive control needs --gpu.
+//
+// usage: AtlasFix --dlls <dir> [--mod <GlyphFix.dll>] [--gpu] [--out <summary.md>]
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
+
+namespace AtlasFix
+{
+    static class P
+    {
+        public static int Pass, Fail, Skipped;
+        public static readonly List<string> Lines = new List<string>();
+
+        public static void L(string s = "")
+        {
+            Console.WriteLine(s);
+            Lines.Add(s);
+        }
+
+        public static void Fact(string s) => L("[FACT] " + s);
+        public static void Real(string s) => L("[REAL] " + s);
+        public static void Gpu(string s) => L("[GPU] " + s);
+        public static void Note(string s) => L("[NOTE] " + s);
+
+        public static void Ok(string what, bool cond, string detail = "")
+        {
+            string suffix = string.IsNullOrEmpty(detail) ? "" : " (" + detail + ")";
+            if (cond) { Pass++; L("[PASS] " + what + suffix); }
+            else { Fail++; L("[FAIL] " + what + suffix); }
+        }
+
+        public static void Skip(string what, string why)
+        {
+            Skipped++;
+            L("[SKIP] " + what + ": " + why);
+        }
+    }
+
+    static class Engine
+    {
+        public static string Dir;
+        public static Assembly Waylith, CSharp, Unity, Harmony;
+        public static readonly Dictionary<string, Assembly> ByName =
+            new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
+
+        public static void Load(string dir)
+        {
+            Dir = dir;
+            AssemblyLoadContext.Default.Resolving += (ctx, name) =>
+            {
+                if (ByName.TryGetValue(name.Name, out var a)) return a;
+                string p = Path.Combine(dir, name.Name + ".dll");
+                if (File.Exists(p)) { var asm = LoadFile(p); ByName[name.Name] = asm; return asm; }
+                return null;
+            };
+            foreach (var f in Directory.GetFiles(dir, "*.dll").OrderBy(x => x, StringComparer.Ordinal))
+            {
+                try { var a = LoadFile(f); ByName[a.GetName().Name] = a; }
+                catch (Exception e) { Console.Error.WriteLine("[load] " + Path.GetFileName(f) + ": " + e.Message); }
+            }
+            Waylith = Find("Waylith");
+            CSharp = Find("Assembly-CSharp");
+            Unity = Find("UnityStubs");
+            Harmony = Find("0Harmony");
+        }
+
+        static Assembly LoadFile(string p) => AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(p));
+        static Assembly Find(string n) => ByName.TryGetValue(n, out var a) ? a : null;
+
+        public static Type T(string fullName)
+        {
+            foreach (var a in ByName.Values)
+            {
+                var t = a.GetType(fullName, throwOnError: false);
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        static readonly Dictionary<string, Type> Simple = new Dictionary<string, Type>(StringComparer.Ordinal);
+        public static Type TSimple(string simple)
+        {
+            if (Simple.TryGetValue(simple, out var hit)) return hit;
+            Type best = null;
+            foreach (var a in ByName.Values)
+            {
+                Type[] types;
+                try { types = a.GetTypes(); }
+                catch (ReflectionTypeLoadException e) { types = e.Types.Where(x => x != null).ToArray(); }
+                foreach (var t in types)
+                    if (t.Name == simple && !t.IsGenericTypeDefinition) { best = t; break; }
+                if (best != null) break;
+            }
+            Simple[simple] = best;
+            return best;
+        }
+    }
+
+    /// <summary>Reflection plumbing: one cached lookup per (type, member) and optional-argument filling.</summary>
+    static class R
+    {
+        const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        const BindingFlags AnyStatic = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+
+        public static MethodInfo M(Type t, string name, int argc = -1)
+        {
+            if (t == null) return null;
+            foreach (var m in t.GetMethods(Any | BindingFlags.Static))
+            {
+                if (m.Name != name) continue;
+                if (argc >= 0 && m.GetParameters().Length != argc) continue;
+                return m;
+            }
+            return null;
+        }
+
+        public static MethodInfo MExact(Type t, string name, params string[] parameterTypeNames)
+        {
+            if (t == null) return null;
+            foreach (var m in t.GetMethods(Any | BindingFlags.Static))
+            {
+                if (m.Name != name) continue;
+                var ps = m.GetParameters();
+                if (ps.Length != parameterTypeNames.Length) continue;
+                bool ok = true;
+                for (int i = 0; i < ps.Length; i++)
+                {
+                    string want = parameterTypeNames[i];
+                    if (ps[i].ParameterType.Name != want && ps[i].ParameterType.FullName != want) { ok = false; break; }
+                }
+                if (ok) return m;
+            }
+            return null;
+        }
+
+        public static object Default(Type t) => t.IsValueType ? Activator.CreateInstance(t) : null;
+
+        public static object Coerce(Type t, object v)
+        {
+            if (v == null) return Default(t);
+            if (t.IsInstanceOfType(v)) return v;
+            if (t == typeof(nint)) return (nint)Convert.ToInt64(v, CultureInfo.InvariantCulture);
+            if (t == typeof(ulong)) return Convert.ToUInt64(v, CultureInfo.InvariantCulture);
+            if (t == typeof(long)) return Convert.ToInt64(v, CultureInfo.InvariantCulture);
+            if (t == typeof(int)) return Convert.ToInt32(v, CultureInfo.InvariantCulture);
+            if (t.IsEnum) return Enum.ToObject(t, v);
+            return v;
+        }
+
+        public static object Invoke(MethodInfo m, object target, params object[] args)
+        {
+            if (m == null) throw new MissingMethodException("method not resolved");
+            var ps = m.GetParameters();
+            var final = new object[ps.Length];
+            for (int i = 0; i < ps.Length; i++)
+            {
+                object v = i < args.Length ? args[i] : null;
+                final[i] = v == null ? Default(ps[i].ParameterType) : Coerce(ps[i].ParameterType, v);
+            }
+            return m.Invoke(m.IsStatic ? null : target, final);
+        }
+
+        public static object Call(object target, string name, params object[] args)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+            var m = M(target.GetType(), name, args.Length) ?? M(target.GetType(), name);
+            return Invoke(m, target, args);
+        }
+
+        public static object CallS(Type t, string name, params object[] args)
+        {
+            var m = M(t, name, args.Length) ?? M(t, name);
+            return Invoke(m, null, args);
+        }
+
+        public static object Get(object target, string member)
+        {
+            if (target == null) return null;
+            Type t = target.GetType();
+            var f = t.GetField(member, Any) ?? t.GetField(member, AnyStatic);
+            if (f != null) return f.GetValue(f.IsStatic ? null : target);
+            var p = t.GetProperty(member, Any);
+            return p?.GetValue(target, null);
+        }
+
+        public static object GetS(Type t, string member)
+        {
+            if (t == null) return null;
+            var f = t.GetField(member, AnyStatic) ?? t.GetField(member, Any);
+            if (f != null) return f.GetValue(null);
+            var p = t.GetProperty(member, AnyStatic);
+            return p?.GetValue(null, null);
+        }
+
+        public static void Set(object target, string member, object value)
+        {
+            Type t = target.GetType();
+            var f = t.GetField(member, Any);
+            if (f != null) { f.SetValue(target, value); return; }
+            t.GetProperty(member, Any)?.SetValue(target, value, null);
+        }
+
+        public static void SetS(Type t, string member, object value)
+        {
+            var f = t.GetField(member, AnyStatic);
+            if (f != null) { f.SetValue(null, value); return; }
+            t.GetProperty(member, AnyStatic)?.SetValue(null, value, null);
+        }
+
+        public static bool Has(Type t, string member)
+        {
+            if (t == null) return false;
+            return t.GetField(member, Any) != null || t.GetProperty(member, Any) != null
+                   || t.GetField(member, AnyStatic) != null || t.GetProperty(member, AnyStatic) != null;
+        }
+    }
+
+    static class Program
+    {
+        static Type _tex2d, _atlas, _groupMut, _keyMut, _groupKey, _gpuSvc, _graphic, _matPool, _matReq;
+        static int Main(string[] argv)
+        {
+            string dlls = Argv(argv, "--dlls") ?? "dlls";
+            string mod = Argv(argv, "--mod");
+            string outPath = Argv(argv, "--out");
+            bool gpu = argv.Contains("--gpu");
+
+            P.L("# AtlasFix — StaticTextureAtlas.Bake keeps tiles for textures that never reached the page");
+            P.L();
+            P.L("- dlls: `" + Path.GetFullPath(dlls) + "`");
+            foreach (var f in new[] { "Assembly-CSharp.dll", "UnityStubs.dll", "Waylith.dll" })
+            {
+                string p = Path.Combine(dlls, f);
+                if (File.Exists(p))
+                    P.L("- " + f + ": " + new FileInfo(p).Length + " bytes, md5 " + Md5(p));
+            }
+            P.L("- mode: " + (gpu ? "real Vulkan device requested" : "no device (negative control only)"));
+            P.L();
+
+            Engine.Load(dlls);
+            _tex2d = Engine.T("UnityEngine.Texture2D");
+            _atlas = Engine.T("Verse.StaticTextureAtlas");
+            _keyMut = Engine.T("Verse.TextureAtlasGroupKey");
+            _groupMut = Engine.T("Verse.TextureAtlasGroup");
+            _gpuSvc = Engine.T("Waylith.Rendering.GpuTextureService");
+            _graphic = Engine.T("Verse.Graphic");
+            _matPool = Engine.T("Verse.MaterialPool");
+            _matReq = Engine.T("Verse.MaterialRequest");
+            if (_tex2d == null || _atlas == null || _keyMut == null || _groupMut == null)
+            {
+                P.L("[FAIL] required types missing (tex2d=" + (_tex2d != null) + " atlas=" + (_atlas != null)
+                    + " key=" + (_keyMut != null) + " group=" + (_groupMut != null) + ")");
+                return 2;
+            }
+
+            bool gpuReady = false;
+            if (gpu) gpuReady = BringUpDevice();
+            if (gpu) P.Ok("device came up (--gpu was requested)", gpuReady, gpuReady ? "lavapipe" : "see the [SKIP] line above");
+
+            Environment();
+            InstallMipNoOp();
+            var facts = Measure(gpuReady);
+            _facts = facts;
+
+            // ---------------------------------------------------------------- control: no patch
+            P.L();
+            P.L("## 1. Control — the shipped Bake, no patch installed");
+            P.L();
+            var a1 = BakeAtlas("control", facts, gpuReady);
+
+            P.L();
+            P.L("## 2. Control — what the graphic does with that tile");
+            P.L();
+            var harm = ReplacementInfo(a1, facts);
+
+            // ---------------------------------------------------------------- patched: GlyphFix atlasbake
+            P.L();
+            P.L("## 3. GlyphFix atlasbake installed (real Harmony patch on the shipped method)");
+            P.L();
+            bool patched = InstallMod(mod);
+
+            P.L();
+            P.L("## 4. Patched — same two textures, same shipped Bake");
+            P.L();
+            var a2 = patched ? BakeAtlas("patched", facts, gpuReady) : null;
+
+            P.L();
+            P.L("## 5. Patched — replacement info");
+            P.L();
+            var harm2 = a2 != null ? ReplacementInfo(a2, facts) : null;
+
+            // ---------------------------------------------------------------- verdicts
+            P.L();
+            P.L("## 6. Verdicts");
+            P.L();
+
+            P.Ok("control: Bake registers a tile for the non-resident texture",
+                a1 != null && a1.DeadInTiles, a1 == null ? "bake failed" : "tiles=" + a1.Tiles + " of " + a1.Textures);
+            P.Ok("control: Bake did not throw (the failure is silent)",
+                a1 != null && a1.Threw == null, a1?.Threw ?? (a1 == null ? "no bake" : "no exception"));
+            if (gpuReady)
+            {
+                P.Ok("control: the non-resident texture's cell has no pixels (page stays clear)",
+                    a1 != null && a1.DeadCellOpaque == 0, a1?.PixelNote ?? "not measured");
+                P.Ok("control: a resident texture's cell does have pixels",
+                    a1 != null && a1.LiveCellOpaque > 0, a1?.PixelNote ?? "not measured");
+            }
+            else
+            {
+                P.Skip("control: page pixels", "no device: the page has no GPU resource at all, so every cell is trivially empty and the measurement cannot discriminate");
+            }
+            P.Ok("control: TryGetTextureAtlasReplacementInfo(true) — the source texture is swapped for that cell",
+                harm != null && harm.Dead, harm?.Note ?? "not evaluated");
+            P.Ok("control: the live texture is replaced the same way (the mechanism works)",
+                harm != null && harm.Live, harm?.Note ?? "not evaluated");
+
+            if (!patched)
+            {
+                P.Skip("patched: tile removal", mod == null ? "no --mod given" : "the module did not install");
+            }
+            else
+            {
+                P.Ok("patched: the non-resident texture is no longer registered in tiles",
+                    a2 != null && !a2.DeadInTiles, a2 == null ? "bake failed" : "tiles=" + a2.Tiles + " of " + a2.Textures);
+                P.Ok("patched: tiles and textures still agree in count (no dangling entries)",
+                    a2 != null && a2.Tiles == a2.Textures, a2 == null ? "bake failed" : a2.Tiles + "/" + a2.Textures);
+                P.Ok("patched: neither cache key is left behind (a page with a hole is never cached)",
+                    a2 != null && a2.ColorKey == null && a2.MaskKey == null,
+                    a2 == null ? "bake failed" : "color=" + (a2.ColorKey ?? "null") + " mask=" + (a2.MaskKey ?? "null"));
+                P.Ok("patched: TryGetTextureAtlasReplacementInfo(false) — the graphic keeps its own texture",
+                    harm2 != null && !harm2.Dead, harm2?.Note ?? "not evaluated");
+                if (gpuReady)
+                {
+                    P.Ok("patched: the resident texture is still registered and still hits",
+                        a2 != null && a2.LiveInTiles && harm2 != null && harm2.Live,
+                        a2 == null ? "bake failed" : "inTiles=" + a2.LiveInTiles + " hit=" + (harm2?.Live ?? false));
+                    P.Ok("patched: the resident texture's cell still has pixels",
+                        a2 != null && a2.LiveCellOpaque > 0, a2?.PixelNote ?? "not measured");
+                }
+                else
+                {
+                    P.Skip("patched: positive control (resident texture kept)", "needs a device; without one every texture is non-resident and the patch correctly drops all of them");
+                }
+            }
+
+            P.L();
+            P.L("RESULT: " + (P.Fail == 0 ? "PASS" : "FAIL") + " — assertions=" + (P.Pass + P.Fail)
+                + " passed=" + P.Pass + " failed=" + P.Fail + " skipped=" + P.Skipped);
+            if (outPath != null)
+            {
+                try { File.WriteAllLines(outPath, P.Lines); } catch (Exception e) { Console.Error.WriteLine("summary: " + e.Message); }
+            }
+            return P.Fail == 0 ? 0 : 1;
+        }
+
+        // ------------------------------------------------------------------ environment
+
+        static void Environment()
+        {
+            P.L("## 0. Environment facts that make Bake reachable headless");
+            P.L();
+            try
+            {
+                var dp = Engine.T("Verse.DeepProfiler");
+                var en = dp?.GetField("enabled", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (en != null) { en.SetValue(null, false); P.Real("Verse.DeepProfiler.enabled = false (Bake opens a DeepProfilerScope, which otherwise reads Prefs.LogVerbose)"); }
+            }
+            catch (Exception e) { P.Note("DeepProfiler.enabled: " + e.Message); }
+
+            try
+            {
+                var tcs = Engine.T("Waylith.Graphics.Textures.TextureCompressionSettings")
+                          ?? Engine.TSimple("TextureCompressionSettings");
+                object target = R.GetS(tcs, "Target");
+                P.Real("TextureCompressionSettings.Target = " + target + " -> atlas compression is "
+                       + (target != null && target.ToString() != "None" ? "ON (Bake would try to compress)" : "off (Bake takes the blit path)"));
+            }
+            catch (Exception e) { P.Note("TextureCompressionSettings: " + e.Message); }
+
+            try
+            {
+                var gta = Engine.T("Verse.GlobalTextureAtlasManager");
+                object enabled = R.GetS(gta, "AtlasCompressionEnabled");
+                P.Real("GlobalTextureAtlasManager.AtlasCompressionEnabled = " + enabled);
+            }
+            catch (Exception e) { P.Note("AtlasCompressionEnabled: " + e.Message); }
+
+            try
+            {
+                // MaterialAllocator.Create() refuses to run "off main thread" and returns null, which
+                // would turn Bake into a NullReferenceException before the blit loop. The game sets
+                // this during boot; a console host has to do it itself. Nothing else depends on it.
+                var t = Engine.T("Verse.UnityData");
+                if (t != null)
+                {
+                    R.SetS(t, "initialized", true);
+                    R.SetS(t, "mainThreadId", System.Threading.Thread.CurrentThread.ManagedThreadId);
+                    R.SetS(t, "dataPath", Path.GetFullPath(Engine.Dir));
+                    P.Real("UnityData: mainThreadId=" + R.GetS(t, "mainThreadId")
+                           + " initialized=" + R.GetS(t, "initialized")
+                           + " -> IsInMainThread=" + R.GetS(t, "IsInMainThread"));
+                }
+            }
+            catch (Exception e) { P.Note("UnityData: " + e.Message); }
+
+            P.Fact("Bake() runs BuildMeshesForUvs (tiles.Add for every texture) before any blit — static.cs:164-171");
+            P.Fact("BlitTexturesToColorAtlas clears the page to Color.clear and calls Graphics.DrawTexture per tile — static.cs:474-492");
+            P.Fact("DrawTexture's source gate is `GpuTexture != null` after EnsureGpuResident(); on failure it calls StubWarner.LogStub and returns — UnityStubs Graphics.cs:560-596");
+            P.Fact("Graphic.TryGetTextureAtlasReplacementInfo swaps mainTexture for atlas.ColorTexture and the uvRect for the tile — Graphic.cs:172633-172659");
+        }
+
+        // ------------------------------------------------------------------ textures
+
+        sealed class Facts
+        {
+            public object Live, Dead;
+            public bool LiveResident, DeadResident;
+        }
+
+        static Facts Measure(bool gpuReady)
+        {
+            var f = new Facts();
+            P.L();
+            P.L("## 0b. The two textures");
+            P.L();
+
+            // live: a real 128x128 RGBA texture with opaque pixels, the way a decoded icon looks.
+            f.Live = MakeLive(128);
+            // dead: exactly the deferred-loading shape - metadata only, no CPU levels, SourcePath set
+            // to a file that is not there, so nothing can ever hydrate it.
+            f.Dead = MakeUnhydratable(128);
+
+            f.LiveResident = Resident(f.Live);
+            f.DeadResident = Resident(f.Dead);
+            P.Real("live = '" + Name(f.Live) + "' " + Size(f.Live) + " CpuData=" + (R.Get(f.Live, "CoreTexture") != null)
+                   + " SourcePath=" + (SourcePath(f.Live) ?? "null") + " GpuResource=" + Gpu(f.Live)
+                   + " -> EnsureGpuResident()=" + f.LiveResident);
+            P.Real("dead = '" + Name(f.Dead) + "' " + Size(f.Dead) + " CpuData=" + (R.Get(f.Dead, "CoreTexture") != null)
+                   + " SourcePath=" + (SourcePath(f.Dead) ?? "null") + " GpuResource=" + Gpu(f.Dead)
+                   + " -> EnsureGpuResident()=" + f.DeadResident);
+            if (f.LiveResident && !f.DeadResident)
+                P.Ok("the fixture is discriminating (live resident, dead not)", true, "live=true dead=false");
+            else if (!gpuReady)
+                P.Skip("fixture discrimination", "no device in this run: nothing is resident, so the positive half cannot be exercised");
+            else
+                P.Ok("the fixture is discriminating (live resident, dead not)", false,
+                     "live=" + f.LiveResident + " dead=" + f.DeadResident);
+            return f;
+        }
+
+        static object MakeLive(int size)
+        {
+            var fmt = Engine.TSimple("TextureFormat");
+            object rgba32 = Enum.Parse(fmt, "RGBA32");
+            var tex = Activator.CreateInstance(_tex2d, new[] { (object)size, size, rgba32, false });
+            R.Set(tex, "name", "atlasfix_live");
+            var c32 = Engine.TSimple("Color32");
+            var arr = Array.CreateInstance(c32, size * size);
+            for (int i = 0; i < arr.Length; i++)
+                arr.SetValue(Activator.CreateInstance(c32, new object[] { (byte)230, (byte)140, (byte)40, (byte)255 }), i);
+            R.Invoke(R.MExact(_tex2d, "SetPixels32", "Color32[]"), tex, new object[] { arr });
+            R.Invoke(R.M(_tex2d, "Apply", 2) ?? R.M(_tex2d, "Apply"), tex, new object[0]);
+            return tex;
+        }
+
+        static object MakeUnhydratable(int size)
+        {
+            // Waylith.Rendering.Texture2D.NewFileTexture(path, fullPath, w, h, format, mipCount, opaque,
+            // premultiply, swizzle) is what the deferred loader uses: CpuData allocated but empty,
+            // SourcePath recorded, no GPU resource. Pointing it at a missing file makes it the shape
+            // the deferred window produces for content that cannot be hydrated.
+            var core = Engine.T("Waylith.Rendering.Texture2D");
+            var m = core?.GetMethod("NewFileTexture", BindingFlags.NonPublic | BindingFlags.Static);
+            string missing = Path.Combine(Path.GetTempPath(), "atlasfix_missing_" + Guid.NewGuid().ToString("N") + ".png");
+            var fmt = Engine.T("Waylith.Graphics.Textures.LoadedTextureFormat") ?? Engine.TSimple("LoadedTextureFormat");
+            var sw = Engine.TSimple("TextureSwizzle");
+            object coreTex;
+            if (m != null && fmt != null)
+            {
+                coreTex = R.Invoke(m, null, new object[]
+                {
+                    missing, missing, size, size, EnumOf(fmt, "Rgba32", "RGBA32", "Rgba"), 1, false, false,
+                    sw != null ? Activator.CreateInstance(sw) : null
+                });
+            }
+            else
+            {
+                // fallback shape: uninitialised CPU storage, no source path
+                var lf = fmt ?? Engine.TSimple("LoadedTextureFormat");
+                coreTex = Activator.CreateInstance(core, new object[]
+                    { size, size, EnumOf(lf, "Rgba32", "RGBA32", "Rgba"), false, 1, true });
+            }
+            var ctor = _tex2d.GetConstructors(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)
+                             .First(c => c.GetParameters().Length == 1
+                                         && c.GetParameters()[0].ParameterType == core);
+            var tex = ctor.Invoke(new[] { coreTex });
+            R.Set(tex, "name", "atlasfix_dead");
+            return tex;
+        }
+
+        static bool Resident(object tex)
+        {
+            try
+            {
+                var m = R.M(_tex2d, "EnsureGpuResident", 0);
+                return m != null && m.Invoke(tex, null) is bool b && b;
+            }
+            catch (Exception e)
+            {
+                P.Note("EnsureGpuResident('" + Name(tex) + "'): " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                return false;
+            }
+        }
+
+        static string Gpu(object tex)
+        {
+            try
+            {
+                object core = R.Get(tex, "CoreTexture");
+                object g = core == null ? null : R.Get(core, "GpuResource");
+                return g == null ? "null" : "present";
+            }
+            catch { return "?"; }
+        }
+
+        static string SourcePath(object tex)
+        {
+            try
+            {
+                object core = R.Get(tex, "CoreTexture");
+                return core == null ? null : R.Get(core, "SourcePath") as string;
+            }
+            catch { return null; }
+        }
+
+        static string Name(object tex)
+        {
+            try { return R.Get(tex, "name") as string ?? "?"; } catch { return "?"; }
+        }
+
+        static string Size(object tex)
+        {
+            try { return R.Get(tex, "width") + "x" + R.Get(tex, "height"); } catch { return "?x?"; }
+        }
+
+        // ------------------------------------------------------------------ bake
+
+        sealed class BakeResult
+        {
+            public object Atlas;
+            public int Textures, Tiles;
+            public bool DeadInTiles, LiveInTiles, Adopted;
+            public string ColorKey, MaskKey;
+            public string Threw;
+            public int DeadCellOpaque = -1, LiveCellOpaque = -1, PageOpaque = -1;
+            public string PixelNote;
+            public string Group;
+        }
+
+        static Facts _facts;
+
+        static BakeResult BakeAtlas(string label, Facts facts, bool gpuReady)
+        {
+            var r = new BakeResult();
+            try
+            {
+                var key = Activator.CreateInstance(_keyMut);
+                R.Set(key, "group", Enum.Parse(_groupMut, "Misc"));
+                R.Set(key, "hasMask", false);
+                r.Group = key.ToString();
+                var atlas = Activator.CreateInstance(_atlas, new[] { key });
+                r.Atlas = atlas;
+
+                var insert = R.M(_atlas, "Insert", 2);
+                R.Invoke(insert, atlas, new object[] { facts.Live, null });
+                R.Invoke(insert, atlas, new object[] { facts.Dead, null });
+
+                var bake = _atlas.GetMethod("Bake", BindingFlags.Public | BindingFlags.Instance,
+                                            null, new[] { typeof(bool) }, null);
+                P.Fact(label + ": calling the shipped StaticTextureAtlas.Bake(bool) on 1 resident + 1 unhydratable texture");
+                try
+                {
+                    bake.Invoke(atlas, new object[] { false });
+                }
+                catch (Exception e)
+                {
+                    var inner = e.InnerException ?? e;
+                    r.Threw = inner.GetType().Name + ": " + inner.Message;
+                    P.Note(label + ": Bake threw " + r.Threw);
+                }
+
+                var textures = R.Get(atlas, "textures") as IList;
+                var tiles = R.Get(atlas, "tiles") as IDictionary;
+                r.Textures = textures?.Count ?? -1;
+                r.Tiles = tiles?.Count ?? -1;
+                r.DeadInTiles = tiles != null && tiles.Contains(facts.Dead);
+                r.LiveInTiles = tiles != null && tiles.Contains(facts.Live);
+                r.Adopted = R.Get(atlas, "AdoptedFromCache") is bool b && b;
+                r.ColorKey = R.Get(atlas, "colorCacheKey") as string;
+                r.MaskKey = R.Get(atlas, "maskCacheKey") as string;
+
+                P.Real(label + ": AdoptedFromCache=" + r.Adopted + " textures=" + r.Textures + " tiles=" + r.Tiles
+                       + " deadInTiles=" + r.DeadInTiles + " liveInTiles=" + r.LiveInTiles
+                       + " colorCacheKey=" + (r.ColorKey ?? "null"));
+
+                object page = R.Get(atlas, "ColorTexture");
+                object pageGpu = page == null ? null : R.Get(R.Get(page, "CoreTexture"), "GpuResource");
+                P.Real(label + ": page " + (page == null ? "null" : R.Get(page, "width") + "x" + R.Get(page, "height"))
+                       + " GpuResource=" + (pageGpu == null ? "null" : "present"));
+
+                if (gpuReady && pageGpu != null)
+                    MeasureCells(r, atlas, facts, page);
+                else if (gpuReady)
+                    r.PixelNote = "page has no GPU resource even with a device";
+                else
+                    r.PixelNote = "no device: page GpuResource=null";
+
+                if (r.PixelNote != null) P.Real(label + ": " + r.PixelNote);
+            }
+            catch (Exception e)
+            {
+                r.Threw ??= e.GetType().Name + ": " + e.Message;
+                P.Note(label + ": " + e.GetType().Name + ": " + e.Message);
+            }
+            return r;
+        }
+
+        /// <summary>Read mip0 back from the page and count opaque texels in each tile's cell.</summary>
+        static void MeasureCells(BakeResult r, object atlas, Facts facts, object page)
+        {
+            try
+            {
+                var tiles = R.Get(atlas, "tiles") as IDictionary;
+                int w = Convert.ToInt32(R.Get(page, "width"));
+                int h = Convert.ToInt32(R.Get(page, "height"));
+                object gpu = R.Get(R.Get(page, "CoreTexture"), "GpuResource");
+                var m = _gpuSvc?.GetMethod("ReadbackTexture2DLevels", BindingFlags.Public | BindingFlags.Static);
+                if (m == null) { r.PixelNote = "ReadbackTexture2DLevels not found"; return; }
+                var levels = m.Invoke(null, new object[] { gpu, w, h, 1, 4, null }) as byte[][];
+                if (levels == null || levels.Length == 0 || levels[0] == null)
+                {
+                    r.PixelNote = "readback returned nothing";
+                    return;
+                }
+                byte[] px = levels[0];
+                int Count(RectI rect)
+                {
+                    int n = 0;
+                    for (int y = rect.Y; y < rect.Y + rect.H; y++)
+                    {
+                        if (y < 0 || y >= h) continue;
+                        for (int x = rect.X; x < rect.X + rect.W; x++)
+                        {
+                            if (x < 0 || x >= w) continue;
+                            int i = (y * w + x) * 4;
+                            if (i + 3 < px.Length && px[i + 3] != 0) n++;
+                        }
+                    }
+                    return n;
+                }
+
+                int total = 0;
+                for (int i = 3; i < px.Length; i += 4) if (px[i] != 0) total++;
+                r.PageOpaque = total;
+
+                if (tiles != null)
+                {
+                    if (tiles.Contains(facts.Dead)) r.DeadCellOpaque = Count(CellOf(tiles[facts.Dead], w, h));
+                    if (tiles.Contains(facts.Live)) r.LiveCellOpaque = Count(CellOf(tiles[facts.Live], w, h));
+                }
+                r.PixelNote = "page=" + w + "x" + h + " opaqueTexels=" + total
+                              + " deadCellOpaque=" + r.DeadCellOpaque + " liveCellOpaque=" + r.LiveCellOpaque
+                              + (r.DeadCellOpaque < 0 ? " (dead tile absent)" : "");
+            }
+            catch (Exception e)
+            {
+                r.PixelNote = "readback failed: " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message);
+            }
+        }
+
+        struct RectI { public int X, Y, W, H; }
+
+        /// <summary>The same four lines BlitTexturesToColorAtlas uses to place a tile (static.cs:486-490).</summary>
+        static RectI CellOf(object tile, int pageW, int pageH)
+        {
+            object uv = R.Get(tile, "uvRect");
+            float x = Convert.ToSingle(R.Get(uv, "x"), CultureInfo.InvariantCulture);
+            float y = Convert.ToSingle(R.Get(uv, "y"), CultureInfo.InvariantCulture);
+            float w = Convert.ToSingle(R.Get(uv, "width"), CultureInfo.InvariantCulture);
+            float h = Convert.ToSingle(R.Get(uv, "height"), CultureInfo.InvariantCulture);
+            int px = (int)Math.Round(x * pageW);
+            int py = (int)Math.Round((1f - y) * pageH);
+            int pw = (int)Math.Round(w * pageW);
+            int ph = (int)Math.Round(h * pageH);
+            py -= ph;
+            return new RectI { X = px, Y = py, W = pw, H = ph };
+        }
+
+        // ------------------------------------------------------------------ replacement info
+
+        sealed class Harm
+        {
+            public bool Dead, Live;
+            public string Note;
+        }
+
+        static Harm ReplacementInfo(BakeResult r, Facts facts)
+        {
+            var h = new Harm();
+            if (r?.Atlas == null) { h.Note = "no atlas"; return h; }
+            try
+            {
+                var gta = Engine.T("Verse.GlobalTextureAtlasManager");
+                var atlases = R.GetS(gta, "staticTextureAtlases") as IList;
+                atlases?.Add(r.Atlas);
+                try
+                {
+                    h.Dead = Try(r.Atlas, facts.Dead, "dead");
+                    h.Live = Try(r.Atlas, facts.Live, "live");
+                }
+                finally
+                {
+                    atlases?.Remove(r.Atlas);
+                    ClearReplacementCache();
+                }
+                h.Note = "dead=" + h.Dead + " live=" + h.Live;
+            }
+            catch (Exception e)
+            {
+                h.Note = e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message);
+                P.Note("replacement info: " + h.Note);
+            }
+            return h;
+        }
+
+        static bool _printedMatError;
+
+        static bool Try(object atlas, object texture, string label)
+        {
+            if (texture == null) return false;
+            try
+            {
+                object mat = R.Invoke(R.M(_matPool, "MatFrom", 1), null, new object[] { texture });
+                if (mat == null)
+                {
+                    if (!_printedMatError) { _printedMatError = true; P.Note("MaterialPool.MatFrom returned null for " + label); }
+                    return false;
+                }
+                var m = R.M(_graphic, "TryGetTextureAtlasReplacementInfo", 7);
+                if (m == null) { P.Note("TryGetTextureAtlasReplacementInfo not found"); return false; }
+                var ps = m.GetParameters();
+                object groupVal = Enum.Parse(_groupMut, "Misc");
+                object[] args =
+                {
+                    mat, groupVal, false, false,
+                    R.Default(ps[4].ParameterType), R.Default(ps[5].ParameterType), R.Default(ps[6].ParameterType)
+                };
+                object ok = m.Invoke(null, args);
+                bool hit = ok is bool b && b;
+                object outMat = args[4];
+                object page = outMat == null ? null : R.Get(outMat, "mainTexture");
+                P.Real("TryGetTextureAtlasReplacementInfo(" + label + ") = " + hit
+                       + (hit ? " -> out material mainTexture=" + Name(page) : "") + " uvRects=" + (args[5] is Array ua ? ua.Length : 0));
+                return hit;
+            }
+            catch (Exception e)
+            {
+                if (!_printedMatError)
+                {
+                    _printedMatError = true;
+                    P.Note("replacement info(" + label + "): " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                }
+                return false;
+            }
+        }
+
+        static void ClearReplacementCache()
+        {
+            try
+            {
+                var f = _graphic?.GetField("replacementInfoCache", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (f?.GetValue(null) is IDictionary d) d.Clear();
+            }
+            catch { }
+        }
+
+        // ------------------------------------------------------------------ the mod
+
+        static bool InstallMod(string modPath)
+        {
+            if (string.IsNullOrEmpty(modPath) || !File.Exists(modPath))
+            {
+                P.Skip("install GlyphFix", modPath == null ? "no --mod" : "not found: " + modPath);
+                return false;
+            }
+            try
+            {
+                var asm = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(modPath));
+                P.Real("loaded " + asm.GetName().Name + " " + asm.GetName().Version + " from " + Path.GetFileName(modPath));
+                var t = asm.GetType("AgentTouchFix.AtlasBakeFix", false);
+                if (t == null) { P.L("[FAIL] AgentTouchFix.AtlasBakeFix not present in the assembly"); return false; }
+                // The module installs itself from its static ctor ([StaticConstructorOnStartup]); running
+                // the ctor is exactly what StaticConstructorOnStartupUtility.CallAll() does.
+                RuntimeHelpers.RunClassConstructor(t.TypeHandle);
+                P.Real("ran AgentTouchFix.AtlasBakeFix's static constructor ([StaticConstructorOnStartup])");
+
+                var bake = _atlas.GetMethod("Bake", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(bool) }, null);
+                var harm = Engine.Harmony;
+                if (harm != null)
+                {
+                    var htype = harm.GetType("HarmonyLib.Harmony");
+                    object info = htype.GetMethod("GetPatchInfo", new[] { typeof(MethodBase) })
+                                       ?.Invoke(null, new object[] { bake });
+                    int postfixes = 0;
+                    string owners = "";
+                    if (info != null)
+                    {
+                        var p = info.GetType().GetProperty("Postfixes");
+                        object listObj = p != null ? p.GetValue(info) : null;
+                        if (listObj is IList list)
+                        {
+                            postfixes = list.Count;
+                            owners = string.Join(",", list.Cast<object>()
+                                .Select(x => R.Get(x, "owner") as string).Where(x => x != null));
+                        }
+                    }
+                    P.Real("Harmony.GetPatchInfo(StaticTextureAtlas.Bake) -> postfixes=" + postfixes
+                           + " owners=[" + owners + "]");
+                    P.Ok("the patch is attached to the shipped method", owners.Contains("atlasbake"),
+                         "owners=[" + owners + "]");
+                }
+                else P.Note("0Harmony not loaded; cannot read patch info");
+
+                string state = t.GetMethod("Summary", BindingFlags.NonPublic | BindingFlags.Static)?.Invoke(null, null) as string;
+                if (state != null) P.Real("module state: " + state);
+                return true;
+            }
+            catch (Exception e)
+            {
+                P.L("[FAIL] install GlyphFix: " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                return false;
+            }
+        }
+
+        // ------------------------------------------------------------------ device
+
+        /// <summary>
+        /// A real device without the engine's window/render loop: GLFW (hidden window, needs an X
+        /// display - xvfb in CI) provides the surface, Waylith's own GraphicsDevice does the rest, and
+        /// GpuTextureService is configured exactly the way EngineApplication.ConfigureGpuServices
+        /// does it. Only the pieces the blit path touches are configured.
+        /// </summary>
+        static bool BringUpDevice()
+        {
+            try
+            {
+                var glfw = Engine.T("Brutal.Glfw.Glfw");
+                var hint = Engine.TSimple("GlfwWindowHint");
+                var winType = Engine.TSimple("GlfwWindow");
+                var gd = Engine.T("Waylith.Graphics.GraphicsDevice");
+                if (glfw == null || winType == null || gd == null || _gpuSvc == null)
+                {
+                    P.Skip("device", "types missing (glfw=" + (glfw != null) + " window=" + (winType != null)
+                                     + " graphicsDevice=" + (gd != null) + " gpuService=" + (_gpuSvc != null) + ")");
+                    return false;
+                }
+
+                bool init = R.Invoke(R.M(glfw, "Init", 0), null) is bool b && b;
+                P.Gpu("Glfw.Init() = " + init);
+                if (!init) { P.Skip("device", "GLFW init failed (no display?)"); return false; }
+
+                R.Invoke(R.M(glfw, "WindowHint", 2), null, new object[] { Enum.Parse(hint, "Visible"), 0 });
+                object win = R.Invoke(R.MExact(glfw, "CreateWindow", "CreateInfo"), null,
+                    new object[] { WinCreateInfo(winType) });
+                P.Gpu("hidden GLFW window = " + (win != null ? "created" : "null"));
+                if (win == null) { P.Skip("device", "window creation failed"); return false; }
+
+                var inst = R.Invoke(R.M(gd, "CreateInstance", 3), null, new object[] { "AtlasFix", "Waylith", false });
+                P.Gpu("Vulkan instance created");
+
+                object vkInstanceHandle = R.Get(inst, "VkHandle");
+                var surfaceMethod = glfw.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                                         .First(x => x.Name == "CreateWindowSurface" && x.GetParameters().Length == 3);
+                object[] sargs = { vkInstanceHandle, win, null };
+                R.Invoke(surfaceMethod, null, sargs);
+                ulong surface = sargs[2] == null ? 0UL : Convert.ToUInt64(sargs[2], CultureInfo.InvariantCulture);
+                P.Gpu("window surface = 0x" + surface.ToString("x"));
+                if (surface == 0) { P.Skip("device", "vkCreateWin32/glfwCreateWindowSurface returned 0"); return false; }
+
+                var vkSurfaceType = surfaceMethod.GetParameters()[2].ParameterType.GetElementType(); // out ulong
+                var vkSurf = Engine.T("Brutal.VulkanApi.VkSurfaceKHR") ?? Engine.TSimple("VkSurfaceKHR");
+                var gpuPref = Engine.T("Waylith.Graphics.GpuPreference") ?? Engine.TSimple("GpuPreference");
+                var surfCtor = vkSurf.GetConstructors().First(c => c.GetParameters().Length == 1);
+                object surfaceObj = surfCtor.Invoke(new object[] { R.Coerce(surfCtor.GetParameters()[0].ParameterType, surface) });
+                object device = R.Invoke(R.M(gd, "Create", 6), null, new object[]
+                {
+                    inst, surfaceObj, 2,
+                    gpuPref != null ? Activator.CreateInstance(gpuPref) : null, false, false
+                });
+                P.Gpu("GraphicsDevice created");
+
+                var configure = R.M(_gpuSvc, "Configure", 2) ?? R.M(_gpuSvc, "Configure");
+                R.Invoke(configure, null, new object[] { device, 2 });
+                P.Gpu("GpuTextureService.Configure(device, 2) done");
+
+                foreach (var name in new[] { "GpuMemoryTracker", "GpuMemoryReport", "RenderTexture", "TextureBlockEncoder", "ComputeKernelCache" })
+                {
+                    try
+                    {
+                        var t = Engine.T("Waylith.Rendering." + name) ?? Engine.TSimple(name);
+                        var m = t == null ? null : t.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                                                  .FirstOrDefault(x => x.Name == "Configure");
+                        if (m == null) continue;
+                        R.Invoke(m, null, m.GetParameters().Length == 2 ? new object[] { device, 2 } : new object[] { device });
+                        P.Gpu("  " + name + ".Configure ok");
+                    }
+                    catch (Exception e) { P.Gpu("  " + name + ".Configure failed: " + (e.InnerException?.Message ?? e.Message)); }
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                P.Skip("device", e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+                return false;
+            }
+        }
+
+        static object WinCreateInfo(Type winType)
+        {
+            // GlfwWindow.CreateInfo { required string Title; required int2 Size; GlfwMonitor Monitor; GlfwWindow Share; }
+            var ci = winType.GetNestedType("CreateInfo");
+            object info = Activator.CreateInstance(ci);
+            ci.GetField("Title").SetValue(info, "atlasfix");
+            var int2 = ci.GetField("Size").FieldType;
+            ci.GetField("Size").SetValue(info, Activator.CreateInstance(int2, new object[] { 64, 64 }));
+            return info;
+        }
+
+        // ------------------------------------------------------------------ misc
+
+        /// <summary>
+        /// Harness instrumentation, not part of the fix: BlitTexturesToColorAtlas ends with
+        /// GenTexture.GenerateMipmaps (a compute pass over the finished page). It runs AFTER
+        /// CopyTexture and after every blit, so it cannot change mip0 or the tile bookkeeping this
+        /// probe measures - and a compute kernel is exactly the kind of thing a bare device without
+        /// the engine's shader/render context cannot run. It is no-op'd here so that a failure in
+        /// that unrelated layer cannot be mistaken for a bake failure.
+        /// </summary>
+        static void InstallMipNoOp()
+        {
+            try
+            {
+                var gen = Engine.T("Verse.GenTexture");
+                var m = gen == null ? null : R.M(gen, "GenerateMipmaps", 4);
+                if (m == null || Engine.Harmony == null) { P.Note("mip no-op not installed (method or 0Harmony missing)"); return; }
+                var htype = Engine.Harmony.GetType("HarmonyLib.Harmony");
+                var hmType = Engine.Harmony.GetType("HarmonyLib.HarmonyMethod");
+                object h = Activator.CreateInstance(htype, new object[] { "atlasfix.harness.mipnoop" });
+                object hm = Activator.CreateInstance(hmType, new object[] { typeof(Program).GetMethod(nameof(SkipMip), BindingFlags.Static | BindingFlags.NonPublic) });
+                var patch = htype.GetMethods().First(x => x.Name == "Patch" && x.GetParameters()[0].ParameterType == typeof(MethodInfo));
+                var ps = patch.GetParameters();
+                var args = new object[ps.Length];
+                args[0] = m;
+                for (int i = 1; i < ps.Length; i++) args[i] = i == 1 ? hm : null;
+                patch.Invoke(h, args);
+                P.Fact("harness instrumentation: Verse.GenTexture.GenerateMipmaps is no-op'd for this run"
+                       + " (compute pass over the page, runs after CopyTexture; mip0 and tiles are unaffected)");
+            }
+            catch (Exception e)
+            {
+                P.Note("mip no-op failed: " + e.GetType().Name + ": " + (e.InnerException?.Message ?? e.Message));
+            }
+        }
+
+        static bool SkipMip() => false;
+
+        static object EnumOf(Type t, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                try { return Enum.Parse(t, n, ignoreCase: true); } catch { }
+            }
+            throw new ArgumentException("none of [" + string.Join(",", names) + "] exist on " + t.FullName);
+        }
+
+        static string Argv(string[] argv, string name)
+        {
+            for (int i = 0; i < argv.Length - 1; i++) if (argv[i] == name) return argv[i + 1];
+            return null;
+        }
+
+        static string Md5(string path)
+        {
+            using var md5 = System.Security.Cryptography.MD5.Create();
+            using var fs = File.OpenRead(path);
+            return Convert.ToHexString(md5.ComputeHash(fs)).ToLowerInvariant();
+        }
+    }
+}

@@ -1,0 +1,128 @@
+name: atlasfix
+
+# Does StaticTextureAtlas.Bake leave a tile registered for a texture that never reached the page,
+# and does the GlyphFix `atlasbake` postfix remove it?
+#
+# Two runs of the same probe over the shipped managed assemblies:
+#   1) no device  - negative control. Nothing can be uploaded, so every texture is non-resident:
+#                   shows the tile registration and the replacement-info hit, but cannot measure
+#                   pixels or the "a resident texture is still baked" half. Those are [SKIP]ped.
+#   2) --gpu      - the same probe with a real Vulkan device (lavapipe) reached through a hidden GLFW
+#                   window under Xvfb. Bake's blits are real, the page is read back, and each tile's
+#                   cell is counted: the unhydratable texture's cell must stay empty, the resident
+#                   one must have pixels, before and after the patch.
+#
+# The gate is exit status: any [FAIL] line fails the job. A run where the device does not come up
+# under --gpu also fails, so a silently device-less run cannot pass.
+on:
+  workflow_dispatch:
+    inputs:
+      glyphfix_ref:
+        description: 'branch of SleepSheepQwQ/rimworld-waylith-icon-fix to build GlyphFix from'
+        required: false
+        default: 'atlasfix'
+  push:
+    paths:
+      - 'atlasfix/**'
+      - '.github/workflows/atlasfix.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlasfix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Reference assemblies
+        run: |
+          set -euo pipefail
+          for f in dlls/Assembly-CSharp.dll dlls/Waylith.dll dlls/UnityStubs.dll dlls/0Harmony.dll; do
+            printf '%s %s bytes md5 %s\n' "$f" "$(stat -c%s "$f")" "$(md5sum "$f" | cut -d' ' -f1)"
+          done
+          dotnet --version
+
+      - name: Build GlyphFix from the mod repository
+        run: |
+          set -euo pipefail
+          REF="${{ inputs.glyphfix_ref || 'atlasfix' }}"
+          echo "glyphfix ref: $REF"
+          curl -fsSL "https://codeload.github.com/SleepSheepQwQ/rimworld-waylith-icon-fix/tar.gz/refs/heads/$REF" -o gf.tgz
+          mkdir -p gf && tar xzf gf.tgz -C gf --strip-components=1
+          grep -n '<Version>' gf/mod/AgentTouchFix.csproj
+          grep -n 'modVersion' gf/mod/About/About.xml
+          dotnet build gf/mod/AgentTouchFix.csproj -c Release -v minimal
+          find gf/mod/bin/Release -name 'GlyphFix.dll' -printf '%p %s bytes\n'
+          md5sum gf/mod/bin/Release/net10.0/GlyphFix.dll
+
+      - name: Build the probe
+        run: dotnet build atlasfix/AtlasFix.csproj -c Release -v minimal
+
+      - name: Software Vulkan, GLFW and a virtual display
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libvulkan1 vulkan-tools mesa-vulkan-drivers libglfw3-dev xvfb
+          ICD=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -1)
+          if [ -z "$ICD" ]; then echo "no lavapipe ICD"; ls -l /usr/share/vulkan/icd.d; exit 1; fi
+          echo "ICD=$ICD"
+          echo "VK_ICD_FILENAMES=$ICD" >> "$GITHUB_ENV"
+          ls -l /usr/lib/x86_64-linux-gnu/libglfw.so* || dpkg -L libglfw3-dev | grep -i glfw
+          vulkaninfo --summary 2>&1 | sed -n '1,30p'
+
+      - name: 1) no device - negative control only
+        run: |
+          set -o pipefail
+          mkdir -p atlasfix/out
+          dotnet run --project atlasfix/AtlasFix.csproj -c Release --no-build -- \
+            --dlls dlls \
+            --mod gf/mod/bin/Release/net10.0/GlyphFix.dll \
+            --out atlasfix/out/offline.md 2>&1 | tee atlasfix/out/offline.log
+
+      - name: 2) real Vulkan (lavapipe) under Xvfb - blits and page pixels
+        run: |
+          set -o pipefail
+          xvfb-run -a --server-args='-screen 0 640x480x24' \
+            dotnet run --project atlasfix/AtlasFix.csproj -c Release --no-build -- \
+              --dlls dlls \
+              --mod gf/mod/bin/Release/net10.0/GlyphFix.dll \
+              --gpu --out atlasfix/out/gpu.md 2>&1 | tee atlasfix/out/gpu.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## atlasfix — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo "- GlyphFix: $(md5sum gf/mod/bin/Release/net10.0/GlyphFix.dll 2>/dev/null | cut -d' ' -f1)"
+            echo ""
+            echo "### no device"
+            echo '```'
+            grep -E '^\[(FACT|REAL|GPU|PASS|FAIL|SKIP|NOTE)\]|^RESULT|^##' atlasfix/out/offline.log || tail -n 40 atlasfix/out/offline.log
+            echo '```'
+            echo "### real Vulkan (lavapipe)"
+            echo '```'
+            grep -E '^\[(FACT|REAL|GPU|PASS|FAIL|SKIP|NOTE)\]|^RESULT|^##' atlasfix/out/gpu.log || tail -n 40 atlasfix/out/gpu.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlasfix-${{ github.run_id }}
+          path: |
+            atlasfix/out/offline.log
+            atlasfix/out/gpu.log
+            atlasfix/out/*.md
+          if-no-files-found: warn
