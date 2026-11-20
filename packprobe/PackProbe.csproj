@@ -14,7 +14,12 @@
     <RootNamespace>PackProbe</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
     <NoWarn>CS0649;CS0169</NoWarn>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="Waylith">
