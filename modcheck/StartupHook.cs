@@ -49,7 +49,7 @@ internal static class StartupHook
         try
         {
             Console.WriteLine($"{T} activeMods={ModsConfig.ActiveModsInLoadOrder.Count()}");
-            foreach (ModContentPack m in ModsConfig.ActiveModsInLoadOrder)
+            foreach (ModMetaData m in ModsConfig.ActiveModsInLoadOrder)
             {
                 Console.WriteLine($"{T} active={m.PackageIdPlayerFacing}|{m.PackageId}|root={m.RootDir}");
             }
