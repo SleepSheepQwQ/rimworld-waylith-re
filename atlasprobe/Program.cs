@@ -276,7 +276,8 @@ namespace AtlasProbe
                 tex = Activator.CreateInstance(tex2d, new[] { (object)2048, 2048, Enum.Parse(gfmt, "R8G8B8A8_SRGB"), 3, f });
             }
             catch (Exception e) { R.Skip("new Texture2D(2048,2048,R8G8B8A8_SRGB,3,...): " + (e.InnerException?.Message ?? e.Message)); return; }
-            var core = tex2d.GetProperty("CoreTexture").GetValue(tex);
+            var coreProp = tex2d.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly).First(p => p.Name == "CoreTexture");
+            var core = coreProp.GetValue(tex);
             var coreType = core.GetType();
             var cpu = coreType.GetProperty("CpuData").GetValue(core);
             bool linear = (bool)cpu.GetType().GetProperty("Linear").GetValue(cpu);
@@ -343,7 +344,7 @@ namespace AtlasProbe
         {
             R.L("## 4. IL facts in the shipped assemblies (Mono.Cecil)");
             R.L();
-            foreach (var f in c.Facts) R.L("- " + f);
+            foreach (var f in c.Facts) R.Fact(f);
             R.L();
             R.L("| assertion | result |");
             R.L("|---|---|");
@@ -404,6 +405,16 @@ namespace AtlasProbe
                 ("40 tiles mixed 32..511", Enumerable.Range(0, 40).Select(i => (32 + (i * 37) % 480, 32 + (i * 53) % 480)).ToArray()),
                 ("9 tiles 511x511", Enumerable.Repeat((511, 511), 9).ToArray()),
             };
+
+            // DeepProfilerScope reads Prefs.LogVerbose, and Prefs.data is null without a game;
+            // DeepProfiler.enabled=false short-circuits it (DeepProfiler.Start: `if (enabled && Prefs.LogVerbose)`).
+            try
+            {
+                var dp = Engine.T(Engine.CSharp, "Verse.DeepProfiler");
+                var en = dp?.GetField("enabled", BindingFlags.Public | BindingFlags.Static);
+                if (en != null) { en.SetValue(null, false); R.Real("Verse.DeepProfiler.enabled = false (so DeepProfilerScope does not touch Prefs)"); }
+            }
+            catch (Exception e) { R.Skip("DeepProfiler.enabled: " + e.Message); }
 
             int okSets = 0;
             string firstNote = null;
