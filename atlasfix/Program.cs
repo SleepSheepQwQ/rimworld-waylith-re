@@ -956,7 +956,9 @@ namespace AtlasFix
                 {
                     var m = glfw.GetMethods(BindingFlags.Public | BindingFlags.Static)
                                 .First(x => x.Name == "CreateWindow" && x.GetParameters().Length == 1);
-                    win = R.Invoke(m, null, new object[] { WinCreateInfo(m.GetParameters()[0].ParameterType) });
+                    var pt = m.GetParameters()[0].ParameterType;
+                    if (pt.IsByRef) pt = pt.GetElementType();   // `in CreateInfo` shows up as CreateInfo&
+                    win = R.Invoke(m, null, new object[] { WinCreateInfo(pt) });
                     return win != null;
                 })) return false;
             P.Gpu("hidden GLFW window created");
