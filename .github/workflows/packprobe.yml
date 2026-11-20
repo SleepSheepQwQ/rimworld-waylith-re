@@ -79,3 +79,47 @@ jobs:
             cat packprobe/out/ilsites.log 2>/dev/null || echo '(no log)'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  src:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install ilspycmd
+        run: dotnet tool install -g ilspycmd
+
+      - name: Dump the callers, as source
+        shell: bash
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          mkdir -p packprobe/out
+          : > packprobe/out/callers.txt
+          for spec in "dlls/Assembly-CSharp.dll|Verse.Steam.Workshop" \
+                      "dlls/Assembly-CSharp.dll|Verse.ModContentLoader\`1" \
+                      "dlls/Assembly-CSharp.dll|Verse.ModDdsLoader" \
+                      "dlls/RimWorld.dll|RimWorldWaylith.Imgui.ImGuiHost" \
+                      "dlls/RimWorld.dll|RimWorldWaylith.Imgui.FontFallbacks"; do
+            dll="${spec%%|*}"; type="${spec##*|}"
+            echo "===== $type =====" >> packprobe/out/callers.txt
+            ilspycmd -t "$type" "$dll" >> packprobe/out/callers.txt 2>&1 || echo "(failed: $type)" >> packprobe/out/callers.txt
+          done
+          wc -l packprobe/out/callers.txt
+
+      - name: The interesting methods only
+        shell: bash
+        run: |
+          grep -n "IsPackedSource\|LoadTexture\b\|LoadTextureViaImageConversion\|TryLoadDds\|LoadFonts\|ShippedFont\|HasFile\|TryReadFile\|LoadFromTextureCache\|LoadFromFile" -A6 -B2 packprobe/out/callers.txt | head -220
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### callers'
+            echo
+            echo '```csharp'
+            grep -n "IsPackedSource\|LoadTexture\|TryLoadDds\|LoadFonts\|ShippedFont\|HasFile\|TryReadFile" -A8 -B3 packprobe/out/callers.txt | head -260
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
