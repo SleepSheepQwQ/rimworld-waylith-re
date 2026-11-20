@@ -67,12 +67,13 @@ jobs:
       - name: Probe the packs
         run: |
           set -euo pipefail
+          OUT="$PWD/out"
           export DOTNET_STARTUP_HOOKS="$PWD/packprobe/bin/Release/net10.0/PackProbe.dll"
           cd "$PWD/run"
-          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces -Verbose > "$PWD/out/vfs.log" 2>&1 || echo "exit=$?"
-          grep -aE '^\[VFS\]' "$PWD/out/vfs.log" | tee "$PWD/out/vfs.txt" || true
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces -Verbose > "$OUT/vfs.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[VFS\]' "$OUT/vfs.log" | tee "$OUT/vfs.txt" || true
           echo "--- boot markers ---"
-          grep -aiE 'asset pack|initialize finished|ModsConfig' "$PWD/out/vfs.log" | head -10 || true
+          grep -aiE 'asset pack|initialize finished|ModsConfig' "$OUT/vfs.log" | head -10 || true
 
       - name: Upload
         if: always()
