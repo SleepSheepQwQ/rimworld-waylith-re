@@ -203,12 +203,12 @@ jobs:
 
           # ---- the log has to show the decision and the module, not just the outcome
           for needle in ("shadowfix: dds shadow guard armed",
-                         "shadowfix: 'Things/ShadowProbe/Shadow' -> png",
-                         "shadowfix: 'Things/ShadowProbe/Shadow.dds' dropped"):
+                         "shadowfix: rescued 'Things/ShadowProbe/Shadow' from 'Shadow.png'",
+                         "shadowfix: post-load repair done"):
               if needle not in b_text:
                   fail("mod log missing: " + needle)
-          if "'Things/ShadowProbe/Dxt3.dds' dropped" in b_text:
-              fail("the guard dropped a dds that has no image fallback (Dxt3) - it must not")
+          if "'Things/ShadowProbe/Dxt3' rescued" in b_text:
+              fail("the repair restored a key that has no image fallback (Dxt3) - it must not")
           if "BUILD 2.6.6 shadow" not in b_text:
               fail("the tested DLL did not report BUILD 2.6.6 shadow")
 
