@@ -156,7 +156,7 @@ namespace AtlasPreloadFix
         /// Give one texture a sentinel GpuTextureAllocation so EnsureResident() returns true through
         /// the shipped first branch. Reflection only: the mod does not compile against Waylith.dll.
         /// </summary>
-        private static bool TryForceResident(Texture2D texture, Action<string> log)
+        internal static bool TryForceResident(Texture2D texture, Action<string> log)
         {
             try
             {
@@ -183,7 +183,7 @@ namespace AtlasPreloadFix
             }
             catch (Exception e)
             {
-                log($"[ATLASFIX] selftest force_resident EXC {e.GetType().Name}: {e.Message}");
+                log?.Invoke($"[ATLASFIX] selftest force_resident EXC {e.GetType().Name}: {e.Message}");
                 return false;
             }
         }
