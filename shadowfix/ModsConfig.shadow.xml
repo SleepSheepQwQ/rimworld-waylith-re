@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mod list for .github/workflows/shadowfix.yml: Core + Odyssey (the leak def's parent), the
+     generated leak mod and the generated ShadowProbe texture pack. Run B appends GlyphFix after
+     ShadowProbe on purpose - last is the worst case for a content-load patch, and the module
+     initializer has to make that work. -->
+<ModsConfigData>
+  <version>1.7.4990 rev1069</version>
+  <activeMods>
+    <li>ludeon.rimworld</li>
+    <li>ludeon.rimworld.odyssey</li>
+    <li>waylith.leakrepro</li>
+    <li>waylith.shadowprobe</li>
+  </activeMods>
+  <knownExpansions>
+    <li>ludeon.rimworld.odyssey</li>
+  </knownExpansions>
+</ModsConfigData>
