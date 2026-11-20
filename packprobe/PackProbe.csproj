@@ -14,8 +14,8 @@
     <NoWarn>$(NoWarn);CS0649;CS0169;CS8632</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Assembly-CSharp"><HintPath>../../dlls/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityStubs"><HintPath>../../dlls/UnityStubs.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="Waylith"><HintPath>../../dlls/Waylith.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp"><HintPath>../dlls/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityStubs"><HintPath>../dlls/UnityStubs.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Waylith"><HintPath>../dlls/Waylith.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>
