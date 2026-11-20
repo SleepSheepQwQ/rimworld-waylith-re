@@ -238,7 +238,9 @@ namespace AtlasProbe
             C("Texture::get_GpuResource resolves a pending build before returning", resolvesOnRead);
             bool threadGate = resolve != null && Calls(resolve, "Environment", "get_CurrentManagedThreadId") && Calls(resolve, null, "TryEnter");
             C("TextureBuildBatch::Resolve returns early off the main thread or when the gate is held", threadGate);
-            bool twoFrames = frameStart != null && CallsWithInt(frameStart, "TextureBuildBatch", "FlushLocked", 2);
+            bool twoFrames = frameStart != null && Calls(frameStart, "TextureBuildBatch", "FlushLocked")
+                             && Body(frameStart).Any(i => IntConst(i) == 2)
+                             && Body(frameStart).Any(i => i.Operand is FieldReference f && f.Name == "_lastEnqueueFrame");
             C("TextureBuildBatch::OnFrameStart flushes 2 frames after the last enqueue", twoFrames);
             if (resolvesOnRead && threadGate && twoFrames)
                 F("`Waylith.Rendering/Texture.cs:59-68` + `TextureBuildBatch.cs:169-187,214-230` - any read of GpuResource on the main thread flushes the *whole* pending batch synchronously (FlushLocked(wait:true)); the 2-frame idle window only matters when nothing reads the texture. So a PendingBuild blank is a main-thread-stall hazard, not a multi-frame one.");
