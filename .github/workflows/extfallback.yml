@@ -289,8 +289,8 @@ jobs:
               fail(f"Bc7 should still load untouched as 128x128 BC7, got {bc}")
 
           # ---- the log has to show which mechanism fired, and that the dds module was really off
-          for needle in ("extfallback: postfix on ContentFinder<Texture2D>.Get",
-                         "extfallback: armed at get",
+          for needle in ("extfallback: postfix on ModContentHolder<Texture2D>.Get(string)",
+                         "extfallback: armed at holder",
                          "extfallback: 'Things/DdsProbe/Shadow' <- file",
                          "ddsfix: disabled by"):
               if needle not in b_text:
