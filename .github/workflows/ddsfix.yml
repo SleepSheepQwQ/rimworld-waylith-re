@@ -1,0 +1,302 @@
+name: ddsfix
+
+# Does GlyphFix 2.6.6 repair the DDS formats Verse.DdsPixelFormat.ToTextureFormat gets wrong, and
+# does it leave the two existing gates alone?
+#
+# Same real host, same fixtures, two runs:
+#
+#   A  Core + Odyssey + leak mod + multi-leak mod + DdsProbe        (no GlyphFix)   control
+#   B  the same, plus GlyphFix built from source in this job                        patched
+#
+# Every number is read out of the engine (ContentFinder / GetPixels32 / Graphic_Collection), never
+# out of the mod: a no-op patch shows up as B == A and fails the gate. The GlyphFix DLL is compiled
+# from the public repository at the ref this workflow was dispatched on, so an unreleased version can
+# be judged; its md5 is printed and uploaded so the tested bytes can be named in the release notes.
+on:
+  push:
+    paths:
+      - 'ddsfix/**'
+      - 'modcheck/**'
+      - '.github/workflows/ddsfix.yml'
+  workflow_dispatch:
+    inputs:
+      glyphfix_ref:
+        description: 'rimworld-waylith-icon-fix ref to build'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ddsfix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ddsfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The mod under test: source, not a release asset, because 2.6.6 has not been published yet.
+      - uses: actions/checkout@v4
+        with:
+          repository: SleepSheepQwQ/rimworld-waylith-icon-fix
+          ref: ${{ github.event.inputs.glyphfix_ref || 'main' }}
+          path: glyphfix
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost, probe and the mod under test
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build modcheck/ModCheck.csproj -c Release -v minimal
+          dotnet build glyphfix/mod/AgentTouchFix.csproj -c Release -v minimal
+          DLL=glyphfix/mod/bin/Release/net10.0/GlyphFix.dll
+          test -f "$DLL"
+          md5sum "$DLL"
+          stat -c '%n %s bytes' "$DLL"
+
+      - name: Unit tests (DDS decision table + block decoders)
+        run: dotnet test glyphfix/tests/TexSt/TexSt.csproj -c Release -v minimal
+
+      - name: Assemble, fixtures and mod list
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          python3 ci/make_leak_mod.py --run "$PWD/run" | tee out/leakmod.txt
+          python3 ci/make_multimod.py --run "$PWD/run" --source "$PWD/game/Resources/Textures" | tee out/multimod.txt
+
+          # DDS fixtures, shipped the way a mod ships them: loose .dds, opaque keys, one case where a
+          # same-named .png also exists (ShadowedByDds drops the png, so the .dds is the only route).
+          M=run/Mods/DdsProbe
+          mkdir -p $M/About $M/Textures/Things/DdsProbe
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<ModMetaData>' \
+            '  <name>DdsProbe</name>' '  <author>ci</author>' '  <packageId>waylith.ddsprobe</packageId>' \
+            '  <supportedVersions><li>1.7</li></supportedVersions>' '</ModMetaData>' > $M/About/About.xml
+          cp ddsfix/bc7.dds        $M/Textures/Things/DdsProbe/Bc7.dds
+          cp ddsfix/bc5.dds        $M/Textures/Things/DdsProbe/Bc5.dds
+          cp ddsfix/dxt3.dds       $M/Textures/Things/DdsProbe/Dxt3.dds
+          cp ddsfix/dxt1_alpha.dds $M/Textures/Things/DdsProbe/Dxt1Alpha.dds
+          cp ddsfix/png_only.png   $M/Textures/Things/DdsProbe/PngOnly.png
+          cp ddsfix/shadow.png     $M/Textures/Things/DdsProbe/Shadow.png
+          cp ddsfix/shadow.dds     $M/Textures/Things/DdsProbe/Shadow.dds
+
+          # The three case mismatches measured in the shipped content (2709 texPaths scanned), rebuilt
+          # as fixtures because the harness only carries a 21-file vanilla texture subset:
+          #   Ibex/Male, WeaponMelee/LongSword vs Longsword, Projectile/Bullet_big vs Bullet_Big.
+          # The file carries one spelling, the probe asks for the other - the exact vanilla shape.
+          mkdir -p $M/Textures/Things/Pawn/Animal/Ibex $M/Textures/Things/WeaponMelee $M/Textures/Things/Projectile
+          cp ddsfix/png_only.png $M/Textures/Things/Pawn/Animal/Ibex/IbexMALE_east.png
+          cp ddsfix/png_only.png $M/Textures/Things/WeaponMelee/Longsword.png
+          cp ddsfix/png_only.png $M/Textures/Things/Projectile/Bullet_Big.png
+          ls -R $M/Textures | head -40
+
+          # GlyphFix, installed the way a player installs it: About/ + Assemblies/ next to Textures/.
+          mkdir -p run/Mods/glyphfix/About run/Mods/glyphfix/Assemblies
+          cp glyphfix/mod/About/About.xml run/Mods/glyphfix/About/
+          cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll run/Mods/glyphfix/Assemblies/
+          md5sum run/Mods/glyphfix/Assemblies/GlyphFix.dll | tee out/dll-md5.txt
+
+      - name: "A) control: fixtures without GlyphFix"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          sed 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>\n    <li>waylith.ddsprobe</li>#' \
+            ci/ModsConfig.leak.xml > "$CFG/ModsConfig.xml"
+          cat "$CFG/ModsConfig.xml"
+          export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
+          export MODCHECK_DEF=Gun_Revolver_LeakExt
+          export PROBE_TIMEOUT_MS=180000
+          export MODCHECK_DDS=1
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[MODCHECK\]' "$PWD/../out/a.log" | tee "$PWD/../out/a.txt" || true
+
+      - name: "B) same fixtures with GlyphFix 2.6.6"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          sed 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>\n    <li>waylith.ddsprobe</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' \
+            ci/ModsConfig.leak.xml > "$CFG/ModsConfig.xml"
+          cat "$CFG/ModsConfig.xml"
+          export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
+          export MODCHECK_DEF=Gun_Revolver_LeakExt
+          export PROBE_TIMEOUT_MS=180000
+          export MODCHECK_DDS=1
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[MODCHECK\]|^\[AgentTouchFix\]' "$PWD/../out/b.log" | tee "$PWD/../out/b.txt" || true
+          # drop the mod from the list again so a re-run of A in the same worktree stays a control
+          sed -i '/sleepsheep.waylith.glyphfix/d' "$CFG/ModsConfig.xml" || true
+
+      - name: Gate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, sys
+
+          def load(path):
+              text = open(path, encoding="utf-8", errors="replace").read()
+              rows = {}
+              for m in re.finditer(r"dds leaf=(\S+) hit=(\w+) name='([^']*)' size=(\S+) fmt=(\S+)' (.*)", text):
+                  leaf, hit, name, size, fmt, stats = m.groups()
+                  def num(key, default=None):
+                      mm = re.search(key + r"=\(?([-\d.]+)", stats)
+                      return float(mm.group(1)) if mm else default
+                  rows[leaf] = dict(hit=hit == "True", name=name, size=size, fmt=fmt, stats=stats,
+                                    rgb=(num("meanRGB"),), lum=num("lumSd"), alpha0=num("alpha0"))
+              return text, rows
+
+          def variants(text):
+              m = re.search(r"fresh variants=(\d+) masks=(\d+)", text)
+              return (int(m.group(1)), int(m.group(2))) if m else None
+
+          def multi(text):
+              m = re.search(r"multi path=\S+ resolved=(\d)/4", text)
+              return int(m.group(1)) if m else None
+
+          def case(text, key):
+              m = re.search(r"case key=" + re.escape(key) + r" hit=(\w+)", text)
+              return m.group(1) == "True" if m else None
+
+          def lum_of(stats):
+              m = re.search(r"meanRGB=\(([-\d.]+),([-\d.]+),([-\d.]+)\)", stats)
+              if not m: return None
+              r, g, b = (float(x) for x in m.groups())
+              return 0.299 * r + 0.587 * g + 0.114 * b
+
+          a_text, a = load("out/a.txt")
+          b_text, b = load("out/b.txt")
+          problems = []
+
+          def fail(msg):
+              print("FAIL: " + msg)
+              problems.append(msg)
+
+          print("=== A) control (no GlyphFix) ===")
+          print("variants:", variants(a_text), " multi:", multi(a_text))
+          for leaf, row in sorted(a.items()):
+              print(f"  {leaf:12s} hit={row['hit']} size={row['size']:9s} fmt={row['fmt']:9s} {row['stats']}")
+
+          print("=== B) with GlyphFix ===")
+          print("variants:", variants(b_text), " multi:", multi(b_text))
+          for leaf, row in sorted(b.items()):
+              print(f"  {leaf:12s} hit={row['hit']} size={row['size']:9s} fmt={row['fmt']:9s} {row['stats']}")
+
+          # ---- the two gates that already existed in modcheck.yml must not move
+          if variants(a_text) != (10, 5):
+              fail(f"control variants should be 10/5, got {variants(a_text)}")
+          if variants(b_text) != (5, 0):
+              fail(f"patched variants should be 5/0, got {variants(b_text)}")
+          if multi(a_text) != 0:
+              fail(f"control multi should resolve 0/4, got {multi(a_text)}")
+          if multi(b_text) != 4:
+              fail(f"patched multi should resolve 4/4, got {multi(b_text)}")
+
+          # ---- BC4/BC5 behind a DX10 header: the control is BC7-labelled and unreadable, the fix is not
+          if "Bc7" not in b or not b["Bc7"]["hit"] or b["Bc7"]["size"] != "128x128":
+              fail("Bc7 should still load 128x128 with GlyphFix (untouched path)")
+          bc5a, bc5b = a.get("Bc5"), b.get("Bc5")
+          if bc5a is None or bc5b is None:
+              fail("Bc5 line missing")
+          else:
+              if "IndexOutOfRange" not in bc5a["stats"] and bc5a["fmt"] not in ("BC7",):
+                  print("note: control Bc5 did not fail the way it was measured before:", bc5a["stats"], bc5a["fmt"])
+              if not bc5b["hit"] or bc5b["size"] != "128x128":
+                  fail(f"Bc5 should load 128x128 with GlyphFix, got {bc5b['size']} hit={bc5b['hit']}")
+              if "px!" in bc5b["stats"]:
+                  fail("Bc5 GetPixels32 still throws with GlyphFix: " + bc5b["stats"])
+              if bc5b["fmt"] == "BC7":
+                  fail("Bc5 must not stay BC7-labelled (that is the defect)")
+              if bc5b["lum"] is None or bc5b["lum"] <= 2:
+                  fail(f"Bc5 pixels look flat (lumSd={bc5b['lum']}), not decoded art")
+              la, lb = lum_of(bc5a["stats"]), lum_of(bc5b["stats"])
+              lu7 = lum_of(b.get("Bc7", {}).get("stats", ""))
+              if lb is not None and lu7:
+                  ratio = max(lb, lu7) / max(1e-6, min(lb, lu7))
+                  print(f"luminance: Bc5={lb:.1f} Bc7={lu7:.1f} ratio={ratio:.2f}")
+                  if ratio > 4.0:
+                      fail(f"Bc5 luminance {lb:.1f} is not the same order as Bc7 {lu7:.1f}")
+
+          # ---- DXT3: BadTex/throw in the control, a real 8x8 texture with GlyphFix
+          d3a, d3b = a.get("Dxt3"), b.get("Dxt3")
+          if d3b is None:
+              fail("Dxt3 line missing")
+          else:
+              if not d3b["hit"] or d3b["size"] != "8x8":
+                  fail(f"Dxt3 should be a real 8x8 texture with GlyphFix, got size={d3b['size']}")
+              if "px!" in d3b["stats"]:
+                  fail("Dxt3 GetPixels32 throws with GlyphFix: " + d3b["stats"])
+              if d3a is not None and d3a["size"] == "8x8":
+                  print("note: control Dxt3 already loaded 8x8 - the fixture no longer reproduces the defect")
+
+          # ---- DXT1 1-bit alpha: the holes must survive, and the file must not go up as DXT1
+          d1a, d1b = a.get("Dxt1Alpha"), b.get("Dxt1Alpha")
+          if d1b is None:
+              fail("Dxt1Alpha line missing")
+          else:
+              if not d1b["hit"] or d1b["size"] != "8x8":
+                  fail(f"Dxt1Alpha should load 8x8, got {d1b['size']}")
+              if d1b["fmt"] in ("DXT1", "DXT1Crunched"):
+                  fail(f"Dxt1Alpha still uploaded as {d1b['fmt']} (BC1_RGB has alpha == 1)")
+              if d1b["alpha0"] != 16:
+                  fail(f"Dxt1Alpha must keep 16 of 64 texels at alpha 0, got {d1b['alpha0']}")
+              if d1a is not None:
+                  print("control Dxt1Alpha: fmt=%s alpha0=%s" % (d1a["fmt"], d1a["alpha0"]))
+
+          # ---- a same-named .png must not be the only route: Shadow.dds is DXT3 too
+          shb = b.get("Shadow")
+          if shb is None or not shb["hit"] or shb["size"] != "8x8":
+              fail(f"Shadow (dds shadows png) should be repaired to 8x8, got {shb and shb['size']}")
+          pg = b.get("PngOnly")
+          if pg is None or not pg["hit"] or pg["size"] in ("2x2", "-"):
+              fail("PngOnly should keep loading as a real texture")
+
+          # ---- the three vanilla case mismatches, exercised through fixtures
+          pairs = [
+              ("Things/Pawn/Animal/Ibex/IbexMale_east", "Ibex (Male vs MALE)"),
+              ("Things/WeaponMelee/LongSword", "LongSword vs Longsword"),
+              ("Things/Projectile/Bullet_big", "Bullet_big vs Bullet_Big"),
+          ]
+          for key, label in pairs:
+              hitA, hitB = case(a_text, key), case(b_text, key)
+              print(f"case {label}: control={hitA} patched={hitB}")
+              if hitB is not True:
+                  fail(f"case fallback did not fire for {label}")
+
+          # ---- the exact spellings must keep working (they are real files)
+          for key in ["Things/Pawn/Animal/Ibex/IbexMALE_east", "Things/WeaponMelee/Longsword",
+                      "Things/Projectile/Bullet_Big"]:
+              if case(b_text, key) is not True:
+                  fail(f"exact key {key} should still hit")
+
+          if problems:
+              print("\n%d check(s) failed" % len(problems))
+              sys.exit(1)
+          print("\nall ddsfix gates passed")
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddsfix-${{ github.run_id }}
+          path: |
+            out/*.log
+            out/*.txt
+            run/Mods/glyphfix/Assemblies/GlyphFix.dll
+          if-no-files-found: warn
