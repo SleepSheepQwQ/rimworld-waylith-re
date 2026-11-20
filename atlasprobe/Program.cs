@@ -576,16 +576,22 @@ namespace AtlasProbe
 
         static int NextPow2(int v) { int p = 1; while (p < v) p <<= 1; return p; }
 
+        static double Num(object o, string name)
+        {
+            var t = o.GetType();
+            var p = Engine.Prop(t, name);
+            if (p != null) return Convert.ToDouble(p.GetValue(o));
+            var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance);
+            if (f != null) return Convert.ToDouble(f.GetValue(o));
+            return 0.0;
+        }
+
         static List<(double x, double y, double w, double h)> ReadRects(Array rects)
         {
             var rs = new List<(double, double, double, double)>();
             if (rects == null) return rs;
             foreach (var r in rects)
-            {
-                var rt = r.GetType();
-                rs.Add(((float)rt.GetField("x").GetValue(r), (float)rt.GetField("y").GetValue(r),
-                        (float)rt.GetField("width").GetValue(r), (float)rt.GetField("height").GetValue(r)));
-            }
+                rs.Add((Num(r, "x"), Num(r, "y"), Num(r, "width"), Num(r, "height")));
             return rs;
         }
 
