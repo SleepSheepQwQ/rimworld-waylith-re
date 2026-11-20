@@ -62,10 +62,39 @@ namespace AtlasProbe
 
         static bool Throws(MethodDefinition m) => Body(m).Any(i => i.OpCode == OpCodes.Throw || (i.Operand is MethodReference t && t.Name == ".ctor" && t.DeclaringType.Name == "InvalidOperationException"));
 
+        static int? IntConst(Instruction i)
+        {
+            if (i == null) return null;
+            int c = (int)i.OpCode.Code;
+            if (c == (int)Code.Ldc_I4_M1) return -1;
+            if (c >= (int)Code.Ldc_I4_0 && c <= (int)Code.Ldc_I4_8) return c - (int)Code.Ldc_I4_0;
+            if (c == (int)Code.Ldc_I4_S) return Convert.ToInt32(i.Operand);
+            if (c == (int)Code.Ldc_I4) return Convert.ToInt32(i.Operand);
+            return null;
+        }
+
         static bool CallsWithInt(MethodDefinition m, string declType, string name, int value) =>
             Body(m).Any(i => i.Operand is MethodReference mr && mr.Name == name &&
                              (declType == null || mr.DeclaringType.Name == declType) &&
-                             i.Previous != null && i.Previous.OpCode == OpCodes.Ldc_I4_S && Convert.ToInt32(i.Previous.Operand) == value);
+                             (IntConst(i.Previous) == value || IntConst(i.Previous?.Previous) == value));
+
+        // follow one level of compiler-generated closures (the execute-image lambdas)
+        static IEnumerable<MethodDefinition> SelfAndLambdas(MethodDefinition m)
+        {
+            yield return m;
+            var type = m.DeclaringType;
+            foreach (var ins in Body(m))
+            {
+                MethodReference mr = ins.Operand as MethodReference;
+                if (mr == null || mr.DeclaringType == null) continue;
+                if (!mr.DeclaringType.Name.StartsWith("<")) continue;
+                foreach (var nested in type.NestedTypes)
+                    foreach (var cand in nested.Methods)
+                        if (cand.Name == mr.Name) yield return cand;
+            }
+        }
+        static bool Reaches(MethodDefinition m, string name) =>
+            SelfAndLambdas(m).Any(x => Calls(x, null, name));
 
         static bool RefersToFieldNamed(MethodDefinition m, string typeName, Func<string, bool> pred) =>
             Body(m).Any(i => i.Operand is FieldReference fr && (typeName == null || fr.DeclaringType.Name == typeName) && pred(fr.Name));
@@ -162,10 +191,11 @@ namespace AtlasProbe
             if (pack != null)
             {
                 var ins = Body(pack).Where(i => i.OpCode != OpCodes.Nop).ToArray();
-                packStub = ins.Length == 2 && ins[0].OpCode == OpCodes.Ldnull && ins[1].OpCode == OpCodes.Ret;
+                packStub = ins.Length >= 2 && ins[ins.Length - 1].OpCode == OpCodes.Ret && ins[ins.Length - 2].OpCode == OpCodes.Ldnull
+                           && ins.Count(i => i.OpCode == OpCodes.Ret) == 1;
                 packDetail = string.Join("; ", ins.Select(i => i.OpCode.Name));
             }
-            C("UnityEngine.Texture2D::PackTextures is `ldnull; ret` (a stub)", packStub, packDetail);
+            C("UnityEngine.Texture2D::PackTextures ends in `ldnull; ret` and has no other return (a stub)", packStub, packDetail);
             if (packStub)
                 F("`UnityStubs/Texture2D.cs:460` - `PackTextures` logs a stub warning and returns null. `StaticTextureAtlas.CalcRectsForAtlas` (static.cs:450) feeds that null straight into `Bake`, which does `array.Length` (static.cs:165) - so the divisor>=4 fallback is a NullReferenceException, not a pack.");
 
@@ -192,10 +222,13 @@ namespace AtlasProbe
                 F("`Verse/StaticTextureAtlas.cs:171-181` - BuildMeshesForUvs runs first, so `tiles` already maps every texture to a uvRect before the blit; `TryGetStaticTile` therefore returns a tile even for a texture that the blit skipped.");
 
             // 10. clearing: CreateEmptyTexture2D clears non-BC images, CreateTexture2D never clears
-            bool emptyClears = createEmpty != null && Calls(createEmpty, null, "ClearColorImage");
-            bool createClears = create != null && Calls(create, null, "ClearColorImage");
-            C("GpuTextureService::CreateEmptyTexture2D clears (ClearColorImage) non-BC images", emptyClears);
-            C("GpuTextureService::CreateTexture2D never clears, even with an empty level list", !createClears);
+            var gts = W.MainModule.GetType("Waylith.Rendering.GpuTextureService");
+            bool typeHasClear = gts != null && gts.Methods.Concat(gts.NestedTypes.SelectMany(t => t.Methods)).Any(x => x.HasBody && Calls(x, null, "ClearColorImage"));
+            bool emptyClears = createEmpty != null && Reaches(createEmpty, "ClearColorImage");
+            bool createClears = create != null && Reaches(create, "ClearColorImage");
+            C("GpuTextureService has a vkCmdClearColorImage path at all", typeHasClear);
+            C("GpuTextureService::CreateEmptyTexture2D reaches ClearColorImage (via its execute lambda)", emptyClears);
+            C("GpuTextureService::CreateTexture2D never reaches ClearColorImage, even on its empty-levels return", !createClears);
             if (emptyClears && !createClears)
                 F("`Waylith.Rendering/GpuTextureService.cs:592-597` - `clearable = !IsDepthFormat && !(format >= Bc1RGBUNormBlock && format <= Bc7SRGBBlock)`: every BC image skips `vkCmdClearColorImage` and is left holding whatever VMA handed out. `CreateTexture2D` (GpuTextureService.cs:376-390) has no clear at all on its `levels.Length == 0` early return (it only transitions the layout).");
 
