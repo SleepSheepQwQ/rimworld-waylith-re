@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using UnityStubs;
@@ -158,6 +160,18 @@ internal static class Program
 
     private static int Main()
     {
+        // Waylith.dll and its friends ship next to this program but are not in its deps.json,
+        // so resolve them from the app directory by simple name.
+        AssemblyLoadContext.Default.Resolving += (context, name) =>
+        {
+            string candidate = Path.Combine(AppContext.BaseDirectory, name.Name + ".dll");
+            return File.Exists(candidate) ? context.LoadFromAssemblyPath(candidate) : null;
+        };
+        return Run();
+    }
+
+    private static int Run()
+    {
         _tmp = Path.Combine(Path.GetTempPath(), "packprobe");
         if (Directory.Exists(_tmp)) Directory.Delete(_tmp, recursive: true);
         Directory.CreateDirectory(_tmp);
@@ -254,6 +268,18 @@ internal static class Program
         List<string> listed = ResourceFiles.EnumerateFiles(Path.Combine(root, "Textures", "Things"), recursive: false).ToList();
         Fact("4.9 VFS listing of Textures/Things", string.Join(", ", listed.Select(Path.GetFileName)));
         Check("4.10 IsPackedSource(Plain) still true via the .dds suffix loop", true, ContentPacks.IsPackedSource(Tex("Plain")));
+
+        // ------------------------------------------------------------ 4b. extension-based lookup
+        Section("4b. extension-based lookup (Resources.FindFile / Resources.Load) cannot see a packed texture");
+        string[] textureExtensions = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".dds", ".psd" };
+        string foundTexture = ResourceFiles.FindExistingFile(ResourceFiles.EnumerateCandidatePaths(new[] { root }, "Textures/Things/Plain", textureExtensions));
+        Fact("4b.1 FindExistingFile(Textures/Things/Plain, texture extensions)", foundTexture ?? "null");
+        Check("4b.2 the resource-style lookup misses a texture the pack does contain", true, foundTexture == null);
+        string foundMesh = ResourceFiles.FindExistingFile(ResourceFiles.EnumerateCandidatePaths(new[] { root }, "Textures/Things/Mesh", new[] { ".obj" }, includeBareIfHasExtension: true));
+        Fact("4b.3 FindExistingFile(Textures/Things/Mesh, .obj)", foundMesh ?? "null");
+        Check("4b.4 the same path resolves as a .nbmesh entry", true, ContentPack.TryGetCurrentEntry(Tex("Mesh"), ".nbmesh", out _, out _));
+        Check("4b.5 IsPackedSource(loose source 'Plain.png')  [appends .dds to a .png path]", false, ContentPacks.IsPackedSource(Tex("Plain") + ".png"));
+        Check("4b.6 IsPackedSource(stem of a split entry)      [no .dds.split in the list]", false, ContentPacks.IsPackedSource(Tex("Split")));
 
         // ------------------------------------------------------------ 5. case
         Section("5. case: three layers, three answers (Ordinal entries vs OrdinalIgnoreCase virtual names)");
