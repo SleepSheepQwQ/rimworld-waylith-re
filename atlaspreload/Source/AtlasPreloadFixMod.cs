@@ -15,6 +15,7 @@ namespace AtlasPreloadFix
     /// EnsureGpuResident call inside the blit loop. The decision is made once, on the complete input
     /// set of the page, before the atlas is built.
     /// </summary>
+    [StaticConstructorOnStartup]
     public static class AtlasPreloadFixMod
     {
         public const string HarmonyId = "sleepsheep.waylith.atlaspreloadfix";
