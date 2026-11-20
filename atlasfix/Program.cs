@@ -952,8 +952,13 @@ namespace AtlasFix
                       () => { R.Invoke(R.MExact(glfw, "WindowHint", "GlfwWindowHint", "Int32") ?? R.M(glfw, "WindowHint", 2),
                                      null, new object[] { visible, 0 }); return true; })) return false;
 
-            if (!Step("Glfw.CreateWindow", () => { win = R.Invoke(R.MExact(glfw, "CreateWindow", "CreateInfo"), null,
-                                                                 new object[] { WinCreateInfo(winType) }); return win != null; })) return false;
+            if (!Step("Glfw.CreateWindow", () =>
+                {
+                    var m = glfw.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                                .First(x => x.Name == "CreateWindow" && x.GetParameters().Length == 1);
+                    win = R.Invoke(m, null, new object[] { WinCreateInfo(m.GetParameters()[0].ParameterType) });
+                    return win != null;
+                })) return false;
             P.Gpu("hidden GLFW window created");
 
             if (!Step("GraphicsDevice.CreateInstance", () => { inst = R.Invoke(R.M(gd, "CreateInstance", 3), null,
@@ -1022,14 +1027,16 @@ namespace AtlasFix
             }
         }
 
-        static object WinCreateInfo(Type winType)
+        /// <summary>GlfwWindow.CreateInfo { required string Title; required int2 Size; Monitor; Share }.</summary>
+        static object WinCreateInfo(Type infoType)
         {
-            // GlfwWindow.CreateInfo { required string Title; required int2 Size; GlfwMonitor Monitor; GlfwWindow Share; }
-            var ci = winType.GetNestedType("CreateInfo");
-            object info = Activator.CreateInstance(ci);
-            ci.GetField("Title").SetValue(info, "atlasfix");
-            var int2 = ci.GetField("Size").FieldType;
-            ci.GetField("Size").SetValue(info, Activator.CreateInstance(int2, new object[] { 64, 64 }));
+            object info = Activator.CreateInstance(infoType);
+            var title = infoType.GetFields(BindingFlags.Public | BindingFlags.Instance).First(f => f.Name == "Title");
+            title.SetValue(info, "atlasfix");
+            var size = infoType.GetFields(BindingFlags.Public | BindingFlags.Instance).First(f => f.Name == "Size");
+            var int2 = size.FieldType;
+            var ctor = int2.GetConstructors().First(c => c.GetParameters().Length == 2);
+            size.SetValue(info, ctor.Invoke(new object[] { 64, 64 }));
             return info;
         }
 
