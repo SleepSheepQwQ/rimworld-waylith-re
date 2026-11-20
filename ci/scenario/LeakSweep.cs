@@ -114,7 +114,7 @@ internal static class LeakSweep
         Console.Error.WriteLine($"{T} leak.names def={def.defName} n={n} names={string.Join(",", names)}");
 
         int maskVariants = names.Count(IsMask);
-        bool alternating = n > 0 && Enumerable.Range(0, n).All(i => IsMask(names[i]) == (i % 2 == 1));
+        bool alternating = n > 1 && Enumerable.Range(1, n - 1).All(i => IsMask(names[i]) != IsMask(names[i - 1]));
         bool allKeepPng = n > 0 && names.All(x => x != null && x.EndsWith(".png", StringComparison.Ordinal));
 
         if (recordRows)
@@ -142,15 +142,15 @@ internal static class LeakSweep
             {
                 thing = ThingMaker.MakeThing(def);
                 thing.thingIDNumber = id;
-                IntVec3 cell;
-                if (!CellFinder.TryFindRandomCellNear(map.Center, map, 30, c => c.Standable(map), out cell))
-                    cell = map.Center;
-                GenSpawn.Spawn(thing, cell, map, WipeMode.Vanish);
+                // Widgets.GetIconFor(Thing) only reads thing.Graphic -> ExtractInnerGraphicFor,
+                // which for Graphic_Random calls SubGraphicFor(thing) (id % n); it never reads
+                // Spawned/Position. Keep the sweep unspawned: the real map above is what proves
+                // the rest of the scenario, and a half-built map mesh is not involved here.
                 tex = Icon(thing);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"{T} leak.id={id} def={def.defName} threw {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine($"{T} leak.id={id} def={def.defName} threw {ex}");
             }
             finally
             {
@@ -175,7 +175,7 @@ internal static class LeakSweep
 
             if (st.W != 128 || st.H != 128) badSize++;
             if (n > 0 && idx != id % n) badIndex++;
-            if (n > 0 && mask != ((id % n) % 2 == 1)) badMaskPattern++;
+            if (n > 0 && mask != IsMask(names[id % n])) badMaskPattern++;
 
             Console.Error.WriteLine($"{T} leak.row def={def.defName} id={id} mod={Mod(id, n)} idx={idx} tex={S(texName)} " +
                                     $"mask={mask} size={st.W}x{st.H} coverage={P(st.Coverage)} meanRGB={Rgb(st)} " +
@@ -226,7 +226,8 @@ internal static class LeakSweep
         {
             Check("leak-ext-sweep-20", rows.Count == Ids, $"rows={rows.Count}/{Ids}");
             Check("leak-ext-index-is-id-mod-n", badIndex == 0, $"mismatches={badIndex}/{Ids} n={n}");
-            Check("leak-ext-mask-ids-odd", badMaskPattern == 0, $"mismatches={badMaskPattern}/{Ids}");
+            Check("leak-ext-mask-follows-table", badMaskPattern == 0,
+                  $"mismatches={badMaskPattern}/{Ids} order={string.Join(",", names)}");
             Check("leak-ext-half-masks", maskRows.Count * 2 == rows.Count && maskRows.Count > 0,
                   $"maskHits={maskRows.Count}/{rows.Count} (expected exactly half for id 0..19, n={n})");
             Check("leak-ext-mask-full-coverage", maskRows.Count > 0 && maskRows.All(r => r.Stats.Coverage >= 0.95),
