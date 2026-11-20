@@ -180,8 +180,9 @@ namespace AtlasPreloadFix
                 property.SetValue(core, sentinel);
                 return texture.EnsureGpuResident();
             }
-            catch
+            catch (Exception e)
             {
+                log($"[ATLASFIX] selftest force_resident EXC {e.GetType().Name}: {e.Message}");
                 return false;
             }
         }
