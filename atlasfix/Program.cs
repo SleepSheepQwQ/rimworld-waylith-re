@@ -926,75 +926,98 @@ namespace AtlasFix
         /// </summary>
         static bool BringUpDevice()
         {
+            var glfw = Engine.T("Brutal.GlfwApi.Glfw") ?? Engine.TSimple("Glfw");
+            var hint = Engine.TSimple("GlfwWindowHint");
+            var winType = Engine.TSimple("GlfwWindow");
+            var gd = Engine.T("Waylith.Graphics.GraphicsDevice");
+            if (glfw == null || winType == null || gd == null || _gpuSvc == null)
+            {
+                P.Skip("device", "types missing (glfw=" + (glfw != null) + " window=" + (winType != null)
+                                 + " graphicsDevice=" + (gd != null) + " gpuService=" + (_gpuSvc != null) + ")");
+                return false;
+            }
+            P.Gpu("glfw type = " + glfw.FullName);
+            P.Gpu("glfw methods: " + string.Join(" ",
+                glfw.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .Where(x => x.Name.Contains("Create") || x.Name.Contains("WindowHint") || x.Name == "Init")
+                    .Select(x => x.Name + "/" + x.GetParameters().Length).Distinct().OrderBy(x => x)));
+
+            object win = null, inst = null, device = null;
+
+            if (!Step("Glfw.Init", () => R.Invoke(R.M(glfw, "Init", 0), null) is bool b && b)) return false;
+            P.Gpu("Glfw.Init() = true");
+
+            object visible = hint != null ? Enum.Parse(hint, "Visible", ignoreCase: true) : (object)0;
+            if (!Step("Glfw.WindowHint(Visible,0)",
+                      () => { R.Invoke(R.MExact(glfw, "WindowHint", "GlfwWindowHint", "Int32") ?? R.M(glfw, "WindowHint", 2),
+                                     null, new object[] { visible, 0 }); return true; })) return false;
+
+            if (!Step("Glfw.CreateWindow", () => { win = R.Invoke(R.MExact(glfw, "CreateWindow", "CreateInfo"), null,
+                                                                 new object[] { WinCreateInfo(winType) }); return win != null; })) return false;
+            P.Gpu("hidden GLFW window created");
+
+            if (!Step("GraphicsDevice.CreateInstance", () => { inst = R.Invoke(R.M(gd, "CreateInstance", 3), null,
+                                                                              new object[] { "AtlasFix", "Waylith", false }); return inst != null; })) return false;
+            P.Gpu("Vulkan instance created");
+
+            ulong surface = 0;
+            if (!Step("glfwCreateWindowSurface", () =>
+                {
+                    var m = glfw.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                                .First(x => x.Name == "CreateWindowSurface" && x.GetParameters().Length == 3);
+                    object[] a = { R.Get(inst, "VkHandle"), win, null };
+                    R.Invoke(m, null, a);
+                    surface = a[2] == null ? 0UL : Convert.ToUInt64(a[2], CultureInfo.InvariantCulture);
+                    return surface != 0;
+                })) return false;
+            P.Gpu("window surface = 0x" + surface.ToString("x"));
+
+            if (!Step("GraphicsDevice.Create", () =>
+                {
+                    var vkSurf = Engine.T("Brutal.VulkanApi.VkSurfaceKHR") ?? Engine.TSimple("VkSurfaceKHR");
+                    var gpuPref = Engine.T("Waylith.Graphics.GpuPreference") ?? Engine.TSimple("GpuPreference");
+                    var ctor = vkSurf.GetConstructors().First(c => c.GetParameters().Length == 1);
+                    object surfaceObj = ctor.Invoke(new object[] { R.Coerce(ctor.GetParameters()[0].ParameterType, surface) });
+                    device = R.Invoke(R.M(gd, "Create", 6), null, new object[]
+                    {
+                        inst, surfaceObj, 2, gpuPref != null ? Activator.CreateInstance(gpuPref) : null, false, false
+                    });
+                    return device != null;
+                })) return false;
+            P.Gpu("GraphicsDevice created");
+
+            if (!Step("GpuTextureService.Configure", () =>
+                { R.Invoke(R.M(_gpuSvc, "Configure", 2) ?? R.M(_gpuSvc, "Configure"), null, new object[] { device, 2 }); return true; })) return false;
+            P.Gpu("GpuTextureService.Configure(device, 2) done");
+
+            foreach (var name in new[] { "GpuMemoryTracker", "GpuMemoryReport", "RenderTexture", "TextureBlockEncoder", "ComputeKernelCache" })
+            {
+                Step(name + ".Configure", () =>
+                {
+                    var t = Engine.T("Waylith.Rendering." + name) ?? Engine.TSimple(name);
+                    var m = t == null ? null : t.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                                              .FirstOrDefault(x => x.Name == "Configure");
+                    if (m == null) return true;
+                    R.Invoke(m, null, m.GetParameters().Length == 2 ? new object[] { device, 2 } : new object[] { device });
+                    P.Gpu("  " + name + ".Configure ok");
+                    return true;
+                });
+            }
+            return true;
+        }
+
+        /// <summary>One device-bring-up step; a failure names the step and its exception chain.</summary>
+        static bool Step(string name, Func<bool> body)
+        {
             try
             {
-                var glfw = Engine.T("Brutal.GlfwApi.Glfw") ?? Engine.TSimple("Glfw");
-                var hint = Engine.TSimple("GlfwWindowHint");
-                var winType = Engine.TSimple("GlfwWindow");
-                var gd = Engine.T("Waylith.Graphics.GraphicsDevice");
-                if (glfw == null || winType == null || gd == null || _gpuSvc == null)
-                {
-                    P.Skip("device", "types missing (glfw=" + (glfw != null) + " window=" + (winType != null)
-                                     + " graphicsDevice=" + (gd != null) + " gpuService=" + (_gpuSvc != null) + ")");
-                    return false;
-                }
-
-                bool init = R.Invoke(R.M(glfw, "Init", 0), null) is bool b && b;
-                P.Gpu("Glfw.Init() = " + init);
-                if (!init) { P.Skip("device", "GLFW init failed (no display?)"); return false; }
-
-                R.Invoke(R.M(glfw, "WindowHint", 2), null, new object[] { Enum.Parse(hint, "Visible"), 0 });
-                object win = R.Invoke(R.MExact(glfw, "CreateWindow", "CreateInfo"), null,
-                    new object[] { WinCreateInfo(winType) });
-                P.Gpu("hidden GLFW window = " + (win != null ? "created" : "null"));
-                if (win == null) { P.Skip("device", "window creation failed"); return false; }
-
-                var inst = R.Invoke(R.M(gd, "CreateInstance", 3), null, new object[] { "AtlasFix", "Waylith", false });
-                P.Gpu("Vulkan instance created");
-
-                object vkInstanceHandle = R.Get(inst, "VkHandle");
-                var surfaceMethod = glfw.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                                         .First(x => x.Name == "CreateWindowSurface" && x.GetParameters().Length == 3);
-                object[] sargs = { vkInstanceHandle, win, null };
-                R.Invoke(surfaceMethod, null, sargs);
-                ulong surface = sargs[2] == null ? 0UL : Convert.ToUInt64(sargs[2], CultureInfo.InvariantCulture);
-                P.Gpu("window surface = 0x" + surface.ToString("x"));
-                if (surface == 0) { P.Skip("device", "vkCreateWin32/glfwCreateWindowSurface returned 0"); return false; }
-
-                var vkSurfaceType = surfaceMethod.GetParameters()[2].ParameterType.GetElementType(); // out ulong
-                var vkSurf = Engine.T("Brutal.VulkanApi.VkSurfaceKHR") ?? Engine.TSimple("VkSurfaceKHR");
-                var gpuPref = Engine.T("Waylith.Graphics.GpuPreference") ?? Engine.TSimple("GpuPreference");
-                var surfCtor = vkSurf.GetConstructors().First(c => c.GetParameters().Length == 1);
-                object surfaceObj = surfCtor.Invoke(new object[] { R.Coerce(surfCtor.GetParameters()[0].ParameterType, surface) });
-                object device = R.Invoke(R.M(gd, "Create", 6), null, new object[]
-                {
-                    inst, surfaceObj, 2,
-                    gpuPref != null ? Activator.CreateInstance(gpuPref) : null, false, false
-                });
-                P.Gpu("GraphicsDevice created");
-
-                var configure = R.M(_gpuSvc, "Configure", 2) ?? R.M(_gpuSvc, "Configure");
-                R.Invoke(configure, null, new object[] { device, 2 });
-                P.Gpu("GpuTextureService.Configure(device, 2) done");
-
-                foreach (var name in new[] { "GpuMemoryTracker", "GpuMemoryReport", "RenderTexture", "TextureBlockEncoder", "ComputeKernelCache" })
-                {
-                    try
-                    {
-                        var t = Engine.T("Waylith.Rendering." + name) ?? Engine.TSimple(name);
-                        var m = t == null ? null : t.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                                                  .FirstOrDefault(x => x.Name == "Configure");
-                        if (m == null) continue;
-                        R.Invoke(m, null, m.GetParameters().Length == 2 ? new object[] { device, 2 } : new object[] { device });
-                        P.Gpu("  " + name + ".Configure ok");
-                    }
-                    catch (Exception e) { P.Gpu("  " + name + ".Configure failed: " + Ex(e)); }
-                }
-                return true;
+                bool ok = body();
+                if (!ok) P.Skip("device step " + name, "returned false");
+                return ok;
             }
             catch (Exception e)
             {
-                P.Skip("device", Ex(e));
+                P.Skip("device step " + name, Ex(e));
                 return false;
             }
         }
