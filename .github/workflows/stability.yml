@@ -1,0 +1,113 @@
+name: stability
+
+# White-box check of one claim: "the icon is re-randomised on every call".
+#
+#   static  - dlls/Assembly-CSharp.dll read with System.Reflection.Metadata: Rand fields/IL,
+#             Graphic_Random.SubGraphicFor/MatSingle/MatAt, GraphicUtility.ExtractInnerGraphicFor,
+#             Widgets.GetIconFor / ThingIcon, BuildableDef.ResolveIcon, every writer of
+#             Thing.overrideGraphicIndex, every caller of Rand.Range.
+#   dynamic - iconexec/ runs the shipped methods: the SAME Thing through 48 GetIconFor calls,
+#             the Rand counter before/after, OverrideGraphicIndex=2, MatSingle/MatAt(null),
+#             SubGraphicFor, ResolveIcon + GetIconFor(def), and a reseed-reproducibility pair.
+#
+# No game process, no GPU, no device. The static job is metadata-only; the dynamic job is the
+# existing iconexec harness (UnityEngine stubbed, Verse compiled code real).
+
+on:
+  push:
+    paths:
+      - 'stability/**'
+      - 'iconexec/**'
+      - '.github/workflows/stability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Reference assembly
+        run: |
+          ls -l dlls/Assembly-CSharp.dll
+          md5sum dlls/Assembly-CSharp.dll
+
+      - name: Build the metadata harness
+        run: dotnet build stability/Stability.csproj -c Release -v minimal
+
+      - name: IL facts and assertions
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p stability/out
+          dotnet stability/bin/Release/net10.0/Stability.dll --dlls dlls | tee stability/out/static.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### stability - static (metadata + IL only)'
+            echo
+            echo '```'
+            grep -E '^\[STABFACT\] (PASS|FAIL|INFO)|^RESULT:|^\[IL\]' stability/out/static.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stability-static
+          path: stability/out/static.log
+
+  dynamic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Reference assembly
+        run: md5sum dlls/Assembly-CSharp.dll
+
+      - name: Build iconexec
+        run: dotnet build iconexec/IconExec.csproj -c Release -v minimal
+
+      - name: Execute the stability blocks
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p stability/out
+          dotnet iconexec/bin/Release/net10.0/IconExec.dll \
+            --dlls dlls --data iconexec/data \
+            --table stability/out/iconexec-table.md \
+            | tee stability/out/dynamic.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### stability - dynamic (shipped methods executed)'
+            echo
+            echo '```'
+            grep -E '^\[STAB\]|^\[PASS\].*(stable|same Thing|Override|MatSingle|MatAt|SubGraphic|def icon|Rand)|^\[FAIL\]|^RESULT:' stability/out/dynamic.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stability-dynamic
+          path: |
+            stability/out/dynamic.log
+            stability/out/iconexec-table.md

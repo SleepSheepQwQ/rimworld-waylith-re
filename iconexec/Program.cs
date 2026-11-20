@@ -412,6 +412,16 @@ namespace IconExec
             }
             catch (Exception ex) { r.DefPathError = Unwrap(ex).GetType().Name + ": " + Unwrap(ex).Message; }
 
+            // ---- stability: the same Thing across many calls, the Rand counter, and the pin ----
+            try { Stability(def.DefName + "/" + mode, thingDef, g, subs); }
+            catch (Exception ex)
+            {
+                var inner = Unwrap(ex);
+                Say("[ERROR] Stability threw " + inner.GetType().FullName + ": " + inner.Message);
+                foreach (var line in Top(inner, 6)) Say("        " + line);
+                Check(def.DefName + "/" + mode + ": stability harness ran", false, inner.GetType().Name + ": " + inner.Message);
+            }
+
             // The def -> graphic path (Thing.DefaultGraphic -> GraphicData.Graphic) is the one the game
             // uses when graphicInt is null; here graphicInt is seeded with the collection built above,
             // so that path is not exercised. It is reported, not asserted: it needs
@@ -428,6 +438,149 @@ namespace IconExec
             catch (Exception ex) { Say("[INFO] GraphicData.Graphic (def path) unavailable in the stub: " + Unwrap(ex).GetType().Name + ": " + Unwrap(ex).Message); }
 
             return r;
+        }
+
+        // ------------------------------------------------------------------ stability
+
+        /// <summary>
+        /// The question is not "does GetIconFor allocate" but "does the same Thing produce the same
+        /// icon". Each block below resets nothing except Rand, and the Rand counter is read before
+        /// and after so "the icon path consumed Rand" is a number, not an opinion.
+        /// </summary>
+        static void Stability(string tag, ThingDef def, Graphic_Random g, Graphic[] subs)
+        {
+            const int N = 48;
+            var mi = typeof(Widgets).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Where(m => m.Name == "GetIconFor")
+                .Where(m => m.GetParameters().Length > 0 && m.GetParameters()[0].ParameterType == typeof(Thing))
+                .OrderBy(m => m.GetParameters().Length).First();
+            var ps = mi.GetParameters();
+
+            var one = NewThing(def, 1234, g);
+            int expectedIdx = 1234 % subs.Length;
+            string expected = TexName(subs[expectedIdx]);
+
+            // ---- A. the same Thing, 48 calls, no Thing or Rand reset in between
+            SetS(typeof(Rand), "seed", 20261120u);
+            SetS(typeof(Rand), "iterations", 0u);
+            var same = new List<string>();
+            for (int i = 0; i < N; i++) same.Add(IconName(mi, ps, one));
+            uint sameRand = (uint)typeof(Rand).GetField("iterations", BindingFlags.Static | BindingFlags.Public).GetValue(null);
+            int sameDistinct = same.Distinct(StringComparer.Ordinal).Count();
+            Say($"[STAB] {tag} sameThing id=1234 calls={N} distinct={sameDistinct} texture={same[0]} "
+                + $"expected={expected} randDelta={sameRand}");
+            Check(tag + ": same Thing icon is stable across calls", sameDistinct == 1,
+                  "distinct=" + sameDistinct + " sequence=" + string.Join(",", same.Take(6)));
+            Check(tag + ": same Thing icon == subGraphics[thingID % n]", same[0] == expected,
+                  same[0] + " vs " + expected);
+            Check(tag + ": GetIconFor(Thing) does not consume Rand", sameRand == 0, "iterations +" + sameRand);
+
+            // ---- B. OverrideGraphicIndex is the pin (the field is public, the property has no setter)
+            var ovField = typeof(Thing).GetField("overrideGraphicIndex", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            ovField.SetValue(one, (int?)2);
+            var ov = new List<string>();
+            for (int i = 0; i < N; i++) ov.Add(IconName(mi, ps, one));
+            int ovDistinct = ov.Distinct(StringComparer.Ordinal).Count();
+            string ovExpected = TexName(subs[2 % subs.Length]);
+            Say($"[STAB] {tag} overrideIndex=2 calls={N} distinct={ovDistinct} texture={ov[0]} expected={ovExpected}");
+            Check(tag + ": OverrideGraphicIndex pins the Thing icon", ovDistinct == 1 && ov[0] == ovExpected,
+                  "distinct=" + ovDistinct + " " + ov[0] + " vs " + ovExpected);
+            ovField.SetValue(one, null);
+
+            // ---- C. only the collection's own MatSingle re-rolls; GetIconFor unwraps first
+            SetS(typeof(Rand), "iterations", 0u);
+            var direct = new List<string>();
+            for (int i = 0; i < N; i++) direct.Add(TexName(g));
+            uint directRand = (uint)typeof(Rand).GetField("iterations", BindingFlags.Static | BindingFlags.Public).GetValue(null);
+            int directDistinct = direct.Distinct(StringComparer.Ordinal).Count();
+            Say($"[STAB] {tag} graphic.MatSingle calls={N} distinct={directDistinct} first={direct[0]} randDelta={directRand}");
+            Check(tag + ": Graphic_Random.MatSingle re-rolls per access", directDistinct > 1,
+                  "distinct=" + directDistinct + " of " + N);
+            Check(tag + ": Graphic_Random.MatSingle consumes Rand", directRand == N, "iterations +" + directRand);
+
+            SetS(typeof(Rand), "iterations", 0u);
+            var matAt = new List<string>();
+            for (int i = 0; i < N; i++)
+            {
+                var mat = g.MatAt(Rot4.North, null);
+                var tex = mat == null ? null : mat.mainTexture as Texture2D;
+                matAt.Add(tex == null ? "<null>" : tex.name);
+            }
+            uint matAtRand = (uint)typeof(Rand).GetField("iterations", BindingFlags.Static | BindingFlags.Public).GetValue(null);
+            Say($"[STAB] {tag} graphic.MatAt(North,null) calls={N} distinct={matAt.Distinct(StringComparer.Ordinal).Count()} "
+                + $"first={matAt[0]} randDelta={matAtRand}");
+            Check(tag + ": MatAt(rot, null) on the collection re-rolls", matAt.Distinct(StringComparer.Ordinal).Count() > 1);
+
+            SetS(typeof(Rand), "iterations", 0u);
+            var subFor = new List<string>();
+            for (int i = 0; i < N; i++) subFor.Add(TexName(g.SubGraphicFor(one)));
+            uint subRand = (uint)typeof(Rand).GetField("iterations", BindingFlags.Static | BindingFlags.Public).GetValue(null);
+            Say($"[STAB] {tag} SubGraphicFor(sameThing) calls={N} distinct={subFor.Distinct(StringComparer.Ordinal).Count()} "
+                + $"texture={subFor[0]} randDelta={subRand}");
+            Check(tag + ": SubGraphicFor(thing) is stable", subFor.Distinct(StringComparer.Ordinal).Count() == 1 && subRand == 0,
+                  "distinct=" + subFor.Distinct(StringComparer.Ordinal).Count() + " randDelta=" + subRand);
+
+            // ---- D. the def-level icon: ResolveIcon runs once, picks subGraphics[0], stores uiIcon
+            SetF(def, "graphic", g);
+            var before = def.uiIcon;
+            var resolve = typeof(BuildableDef).GetMethod("ResolveIcon", BindingFlags.Instance | BindingFlags.NonPublic);
+            resolve.Invoke(def, null);
+            var after = def.uiIcon;
+            string defExpected = TexName(subs[0]);
+            Say($"[STAB] {tag} defIcon before={(before == null ? "<null>" : before.name)} "
+                + $"after={(after == null ? "<null>" : after.name)} expected={defExpected}");
+            Check(tag + ": def icon is subGraphics[0] (ResolveIcon passes a null Thing)",
+                  after != null && after.name == defExpected, (after == null ? "<null>" : after.name) + " vs " + defExpected);
+
+            SetS(typeof(Rand), "iterations", 0u);
+            var defSeq = new List<string>();
+            for (int i = 0; i < 16; i++)
+            {
+                var t = Widgets.GetIconFor(def);
+                defSeq.Add(t == null ? "<null>" : t.name);
+            }
+            uint defRand = (uint)typeof(Rand).GetField("iterations", BindingFlags.Static | BindingFlags.Public).GetValue(null);
+            int defDistinct = defSeq.Distinct(StringComparer.Ordinal).Count();
+            Say($"[STAB] {tag} GetIconFor(def) calls=16 distinct={defDistinct} texture={defSeq[0]} randDelta={defRand}");
+            Check(tag + ": def icon is cached in uiIcon and stable", defDistinct == 1, "distinct=" + defDistinct);
+            Check(tag + ": the def icon path consumes no Rand", defRand == 0, "iterations +" + defRand);
+
+            // ---- E. Rand is one global counter, and reseeding reproduces the sequence
+            var s1 = RandSeq(16);
+            var s2 = RandSeq(16);
+            Say($"[STAB] {tag} rand seq1={string.Join(",", s1)}");
+            Say($"[STAB] {tag} rand seq2={string.Join(",", s2)} equal={s1.SequenceEqual(s2)}");
+            Check(tag + ": Rand is a single reproducible global sequence", s1.SequenceEqual(s2));
+        }
+
+        static string IconName(MethodInfo mi, ParameterInfo[] ps, Thing t)
+        {
+            try
+            {
+                var tex = (Texture2D)mi.Invoke(null, BuildIconArgs(ps, t));
+                return tex == null ? "<null>" : tex.name;
+            }
+            catch (Exception ex) { return "<err:" + Unwrap(ex).GetType().Name + ">"; }
+        }
+
+        static string TexName(Graphic sg)
+        {
+            try
+            {
+                var mat = sg == null ? null : sg.MatSingle;
+                var tex = mat == null ? null : mat.mainTexture as Texture2D;
+                return tex == null ? "<null>" : tex.name;
+            }
+            catch (Exception ex) { return "<err:" + Unwrap(ex).GetType().Name + ">"; }
+        }
+
+        static int[] RandSeq(int n)
+        {
+            SetS(typeof(Rand), "seed", 20261120u);
+            SetS(typeof(Rand), "iterations", 0u);
+            var a = new int[n];
+            for (int i = 0; i < n; i++) a[i] = Rand.Range(0, 1000);
+            return a;
         }
 
         /// <summary>
