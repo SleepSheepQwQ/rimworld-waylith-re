@@ -10,7 +10,7 @@ must never be used to accuse the engine (see waylith-port-ci-verification).
 Layout written:
   ok.png          8x8 RGBA, four quadrants: red / green / blue / white      (control)
   inter.png       the same pixels, Adam7 interlaced                        (interlace-flag test)
-  pal.png         8x8 palette + tRNS, 2x2 tiling red/green/blue/transparent
+  pal.png         8x8 palette (4 entries) + tRNS, 2x2 tiling red/green/blue/transparent
   g16.png         8x8 16-bit RGB, left half red, right half blue
   gray.png        8x8 8-bit greyscale, left half black, right half white
   trunc.png       ok.png with its IDAT payload cut in half
@@ -20,6 +20,9 @@ Layout written:
   bc5_dx10.dds    8x8 BC5 blocks behind a DX10 header, dxgiFormat=83      (DX10 ignored)
   mip4.dds        8x8 BC1, header MipMapCount=4, all four levels present
   short_mips.dds  8x8 BC1, header MipMapCount=4, only level 0 present     (header lies)
+  dds_as.png      the bytes of dxt1_ok.dds behind a .png name        (name/content mismatch)
+  png_as.dds      the bytes of ok.png behind a .dds name             (name/content mismatch)
+  bc4.dds         8x8 BC4 (fourCC 'ATI2')                                 (rejected format)
   cache_a.png     red 8x8, stored with level-0 deflate so its length is fixed
   cache_b.png     green 8x8, byte-for-byte the same length as cache_a.png
 """
@@ -103,7 +106,9 @@ def main(out):
 
     # palette + tRNS: 2x2 tiling of red / green / blue / transparent
     pal_rows = [bytes([(x % 2) + 2 * (y % 2) for x in range(W)]) for y in range(H)]
-    plte = bytes([255, 0, 0, 0, 255, 0, 0, 0, 255])
+    # four palette entries so every index the image uses (0..3) is in range; tRNS makes
+    # entry 3 fully transparent. An out-of-range index here would be my bug, not the engine's.
+    plte = bytes([255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0])
     (out / 'pal.png').write_bytes(
         encode_png(pal_rows, 0, color=3, extra=chunk(b'PLTE', plte) + chunk(b'tRNS', bytes([255, 255, 255, 0]))))
 
@@ -128,6 +133,7 @@ def main(out):
 
     stored_png('cache_a.png', RED)
     stored_png('cache_b.png', GREEN)
+    (out / 'png_as.dds').write_bytes((out / 'cache_a.png').read_bytes())
     a, b = (out / 'cache_a.png').read_bytes(), (out / 'cache_b.png').read_bytes()
     assert len(a) == len(b), (len(a), len(b))
 
@@ -141,8 +147,13 @@ def main(out):
     (out / 'bc5_dx10.dds').write_bytes(dds(b'DX10', 1, b'\x00' * 64, dxgi=83))
 
     full = red_block * 4 + bc1_block(0xF800, 0x001F, 0) * 1 + bc1_block(0xF800, 0x001F, 0) * 1 + bc1_block(0xF800, 0x001F, 0) * 1
-    (out / 'mip4.dds').write_bytes(dds(b'DXT1', 4, full))
-    (out / 'short_mips.dds').write_bytes(dds(b'DXT1', 4, red_block * 4))
+    (out / 'mip4.dds').write_bytes(dds(b'DXT1', 4, full))       # 32 + 8 + 8 + 8 = 56 bytes
+    (out / 'short_mips.dds').write_bytes(dds(b'DXT1', 4, red_block * 4))   # header claims 4, 32 bytes
+    (out / 'bc4.dds').write_bytes(dds(b'ATI2', 1, b'\x00' * 32))
+
+    # the same pictures, each behind the other format's extension (the png one is > 148 bytes
+    # so ModDdsLoader's fixed-size header read succeeds and fails on the magic, not on EOF)
+    (out / 'dds_as.png').write_bytes((out / 'dxt1_ok.dds').read_bytes())
 
     # ---- controls ---------------------------------------------------------------------
     try:
