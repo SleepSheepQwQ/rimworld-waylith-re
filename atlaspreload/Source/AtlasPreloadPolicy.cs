@@ -119,7 +119,7 @@ namespace AtlasPreloadFix
             foreach (Texture2D failed in failures)
             {
                 textures.Remove(failed);
-                if (masks != null)
+                if (failed != null && masks != null)
                 {
                     masks.Remove(failed);
                 }
