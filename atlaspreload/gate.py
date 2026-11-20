@@ -68,9 +68,6 @@ def main(out):
     if "install OK target=StaticTextureAtlas.Bake(bool)" not in fixed_text:
         print("FAIL: patch did not install")
         ok = False
-    if "selftest result=PASS" not in fixed_text:
-        print("FAIL: in-game self-test did not pass")
-        ok = False
 
     # The seeded Meta page is the live A/B: observer keeps both textures in the tile map, the
     # filter keeps the sentinel-resident one and drops the one with no GPU resource.
@@ -80,6 +77,9 @@ def main(out):
         ok = False
     else:
         observe_text = read(observe_path)
+        if "selftest result=PASS" not in observe_text:
+            print("FAIL: in-game self-test did not pass")
+            ok = False
         if not re.search(r"page group=Meta_False cand=2 observe=1", observe_text):
             print("FAIL: observe did not see the two seeded textures")
             ok = False
