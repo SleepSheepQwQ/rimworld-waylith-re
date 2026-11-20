@@ -59,8 +59,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           bash ci/assemble.sh "$PWD/run"
-          PACK=packprobe/pack/Assets.zip
-          if [ "${PACK_VARIANT:-}" = "manifest" ]; then PACK=packprobe/pack/Assets_man.zip; fi
+          PACK=packprobe/pack/Assets_man.zip
           echo "pack variant: $PACK"
           cp "$PACK" "$PWD/run/Assets.zip"
           mkdir -p "$PWD/run/Data/Odyssey"
