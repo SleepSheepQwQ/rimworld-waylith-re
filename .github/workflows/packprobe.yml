@@ -62,6 +62,10 @@ jobs:
           PACK=packprobe/pack/Assets_man.zip
           echo "pack variant: $PACK"
           cp "$PACK" "$PWD/run/Assets.zip"
+          # Bootstrap mounts the core pack at DataPath, so a "Resources/Textures/..." entry is
+          # requested as "<DataPath>/Resources/Textures/...". ci/assemble.sh builds the Unity data
+          # dir instead; give the pack path a matching tree.
+          cp -a "$PWD/run/RimWorld_Data/Resources" "$PWD/run/Resources"
           mkdir -p "$PWD/run/Data/Odyssey"
           cp packprobe/pack/Odyssey.zip "$PWD/run/Data/Odyssey/Assets.zip"
           ls -l "$PWD/run/Assets.zip" "$PWD/run/Data/Odyssey/Assets.zip"
