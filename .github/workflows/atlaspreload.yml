@@ -84,14 +84,20 @@ jobs:
           sed -i 's#</activeMods>#  <li>sleepsheep.waylith.atlaspreloadfix</li>\n  </activeMods>#' "$CFG/ModsConfig.xml"
           grep -n 'atlaspreloadfix' "$CFG/ModsConfig.xml"
 
+          # Observer run: the same two seeded live textures, no filtering. Its tile count is the
+          # control for the filtered run below.
+          ATLASFIX_SEED=1 ATLASFIX_OBSERVE=1 \
+            RUN_DIR="$PWD/run" BOOT_TIMEOUT=300 bash ci/run.sh "$PWD/out/boot_observe.log" \
+            -QuitAfterBoot -Verbose
+
           for i in 1 2; do
-            ATLASFIX_SELFTEST=1 ATLASFIX_BUDGET_MS=250 \
+            ATLASFIX_SEED=1 ATLASFIX_SELFTEST=1 ATLASFIX_BUDGET_MS=250 \
               RUN_DIR="$PWD/run" BOOT_TIMEOUT=300 bash ci/run.sh "$PWD/out/boot_fix_$i.log" \
               -QuitAfterBoot -Verbose
           done
 
           # No budget: measure the raw warm-up cost, even if it exceeds the production threshold.
-          ATLASFIX_SELFTEST=1 ATLASFIX_BUDGET_MS=0 \
+          ATLASFIX_SEED=1 ATLASFIX_SELFTEST=1 ATLASFIX_BUDGET_MS=0 \
             RUN_DIR="$PWD/run" BOOT_TIMEOUT=300 bash ci/run.sh "$PWD/out/boot_fix_unbounded.log" \
             -QuitAfterBoot -Verbose
 
