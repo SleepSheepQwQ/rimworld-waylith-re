@@ -179,7 +179,7 @@ internal static class StartupHook
             // a DX10 header is blindly mapped to BC7 whatever DXGI format it carries).
             if (Environment.GetEnvironmentVariable("MODCHECK_DDS") == "1")
             {
-                foreach (string leaf in new[] { "Bc7", "Bc5", "Dxt3" })
+                foreach (string leaf in new[] { "Bc7", "Bc5", "Dxt3", "PngOnly", "Shadow" })
                 {
                     string key = "Things/DdsProbe/" + leaf;
                     try
