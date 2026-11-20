@@ -1,0 +1,465 @@
+name: ddsprefix
+
+# Does DdsFormatFixAlt - the prefix on Verse.ModDdsLoader.TryLoadDds - repair the DDS formats the
+# shipped loader gets wrong, and does it leave the gates that already exist untouched?
+#
+# This is the second, deliberately independent repair of the same defect. ddsfix.yml measures the
+# ContentFinder-side module (DdsFormatFix); this one measures the loader-side module, from its own
+# seam and against its own fixtures, so the two answers can be compared instead of trusted.
+#
+# Same real host (the port's apphost + the shipped managed closure), three runs:
+#
+#   C  no GlyphFix at all              -> the shipped loader: reproduces the defects and the 10/5,
+#                                         0/4 baselines the other gate compares against
+#   A  GlyphFix, both DDS modules off  -> the mod without either DDS repair; one file on disk
+#                                         (agenttouchfix.ddsalt) differs from B and nothing else
+#   B  GlyphFix, DdsFormatFixAlt armed -> the prefix decides for every loose .dds
+#
+# DdsFormatFix is switched off in A and B through its own switch (agenttouchfix.dds), so every DDS
+# number below belongs to this module alone. That matters: with both installed the ContentFinder
+# postfix re-decides the same files and wins, which is why only one of the two should ship.
+#
+# Fixtures (ddsalt/make_fixtures.py + the shared ddsfix/ set), all judged through ContentFinder and
+# GetPixels32 - never through the mod:
+#
+#   Bc5        bc5.dds                 dxgi 80 = BC4_UNORM, 128x128, 8 levels   managed decode
+#   Dxt3       alt_dxt3_128.dds        128x128 DXT3, 8 levels                  managed decode
+#   Mip1       alt_mip1_128.dds        128x128 DXT3, ONE level                 cpu-filled chain
+#   Shadow     alt_bc3_dx10_128.dds    dxgi 77 = BC3 behind a DX10 header       native or managed
+#   Dxt1Alpha  dxt1_alpha.dds          8x8 DXT1, punch-through blocks           managed decode
+#   Bc7        bc7.dds                 dxgi 98, untouched by either module      left to the loader
+#   PngOnly    png_only.png            the png path must not move
+on:
+  push:
+    paths:
+      - 'ddsalt/**'
+      - '.github/workflows/ddsprefix.yml'
+  workflow_dispatch:
+    inputs:
+      glyphfix_ref:
+        description: 'rimworld-waylith-icon-fix ref to build'
+        required: false
+        default: 'alt/dds-prefix'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ddsprefix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ddsprefix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The mod under test: source, not a release asset. The default ref is the branch that carries
+      # DdsFormatFixAlt; dispatch with glyphfix_ref=<merged branch> to judge the merged tree.
+      - uses: actions/checkout@v4
+        with:
+          repository: SleepSheepQwQ/rimworld-waylith-icon-fix
+          ref: ${{ github.event.inputs.glyphfix_ref || 'alt/dds-prefix' }}
+          path: glyphfix
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      # The modules are wired the way the parent module wires them, inside the job, because this
+      # branch is the mod's main tree plus two files: it does not carry the (uncommitted) Bootstrap
+      # edit that installs them. If the ref already has the calls - a merged branch - this is a no-op,
+      # which also means dispatching on a merged tree measures the real wiring, not this one.
+      - name: Wire CaseFix and DdsFormatFixAlt into Bootstrap
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+
+          p = Path("glyphfix/mod/Source/Bootstrap.cs")
+          s = p.read_text(encoding="utf-8")
+          anchor = "CollectionFix.Install();"
+          added = []
+          for call in ("CaseFix.Install();", "DdsPrefixAlt.Install();"):
+              if call in s:
+                  continue
+              if anchor not in s:
+                  sys.exit("Bootstrap.cs has no '%s' anchor; cannot wire %s" % (anchor, call))
+              s = s.replace(anchor, anchor + "\n                " + call, 1)
+              added.append(call)
+          if added:
+              p.write_text(s, encoding="utf-8")
+          print("wired:", added or "nothing (already present)")
+          PY
+          grep -n "CaseFix.Install\|DdsPrefixAlt.Install" glyphfix/mod/Source/Bootstrap.cs
+
+      - name: Build apphost, probe and the mod under test
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build ddsfix/DdsFixProbe.csproj -c Release -v minimal
+          dotnet build glyphfix/mod/AgentTouchFix.csproj -c Release -v minimal
+          DLL=glyphfix/mod/bin/Release/net10.0/GlyphFix.dll
+          test -f "$DLL"
+          md5sum "$DLL" | tee out/dll-md5.txt
+          stat -c '%n %s bytes' "$DLL"
+
+      # The pure half: header parsing, the DXGI/FourCC tables, the block decoders, the decision table
+      # and the "payload levels == texture levels" invariant. No game assembly, no device.
+      - name: Unit tests (DDS alt decoder + DXGI mapping + mip chain)
+        run: dotnet test glyphfix/tests/DdsAltSt/DdsAltSt.csproj -c Release -v minimal
+
+      - name: Assemble, fixtures and mod list
+        run: |
+          set -euo pipefail
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          python3 ci/make_leak_mod.py --run "$PWD/run" | tee out/leakmod.txt
+          python3 ci/make_multimod.py --run "$PWD/run" --source "$PWD/game/Resources/Textures" | tee out/multimod.txt
+
+          # The generated 128x128 fixtures (DXT3 with a full chain, DXT3 with one level, BC3 behind a
+          # DX10 header) plus the shared ddsfix/ files, shipped the way a mod ships them.
+          python3 ddsalt/make_fixtures.py --out out/fixtures | tee out/fixtures.txt
+          M=run/Mods/DdsProbe
+          mkdir -p $M/About $M/Textures/Things/DdsProbe
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<ModMetaData>' \
+            '  <name>DdsProbe</name>' '  <author>ci</author>' '  <packageId>waylith.ddsprobe</packageId>' \
+            '  <supportedVersions><li>1.7</li></supportedVersions>' '</ModMetaData>' > $M/About/About.xml
+          cp ddsfix/bc7.dds                          $M/Textures/Things/DdsProbe/Bc7.dds
+          cp ddsfix/bc5.dds                          $M/Textures/Things/DdsProbe/Bc5.dds
+          cp out/fixtures/alt_dxt3_128.dds           $M/Textures/Things/DdsProbe/Dxt3.dds
+          cp ddsfix/dxt1_alpha.dds                   $M/Textures/Things/DdsProbe/Dxt1Alpha.dds
+          cp out/fixtures/alt_mip1_128.dds           $M/Textures/Things/DdsProbe/Mip1.dds
+          cp ddsfix/png_only.png                     $M/Textures/Things/DdsProbe/PngOnly.png
+          cp out/fixtures/alt_bc3_dx10_128.dds       $M/Textures/Things/DdsProbe/Shadow.dds
+          cp ddsfix/shadow.png                       $M/Textures/Things/DdsProbe/Shadow.png
+
+          # The three vanilla case mismatches, rebuilt as fixtures (the harness carries a 21-file
+          # vanilla texture subset): the file keeps one spelling, the probe asks for the other.
+          mkdir -p $M/Textures/Things/Pawn/Animal/Ibex $M/Textures/Things/WeaponMelee $M/Textures/Things/Projectile
+          cp ddsfix/png_only.png $M/Textures/Things/Pawn/Animal/Ibex/IbexMALE_east.png
+          cp ddsfix/png_only.png $M/Textures/Things/WeaponMelee/Longsword.png
+          cp ddsfix/png_only.png $M/Textures/Things/Projectile/Bullet_Big.png
+          ls -R $M/Textures | head -40
+
+          # GlyphFix, installed the way a player installs it: About/ + Assemblies/ next to Textures/.
+          mkdir -p run/Mods/glyphfix/About run/Mods/glyphfix/Assemblies
+          cp glyphfix/mod/About/About.xml run/Mods/glyphfix/About/
+          cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll run/Mods/glyphfix/Assemblies/
+          md5sum run/Mods/glyphfix/Assemblies/GlyphFix.dll | tee out/dll-md5.txt
+
+      - name: "C) control: shipped loader, no GlyphFix"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          sed 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>\n    <li>waylith.ddsprobe</li>#' \
+            ci/ModsConfig.leak.xml > "$CFG/ModsConfig.xml"
+          cat "$CFG/ModsConfig.xml"
+          export DOTNET_STARTUP_HOOKS="$PWD/ddsfix/bin/Release/net10.0/DdsFixProbe.dll"
+          export MODCHECK_DEF=Gun_Revolver_LeakExt
+          export PROBE_TIMEOUT_MS=180000
+          export MODCHECK_DDS=1
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/c.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[MODCHECK\]|^\[AgentTouchFix\]' "$PWD/../out/c.log" > "$PWD/../out/c.txt" || true
+
+      - name: "A) GlyphFix with both DDS modules switched off"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          sed 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>\n    <li>waylith.ddsprobe</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' \
+            ci/ModsConfig.leak.xml > "$CFG/ModsConfig.xml"
+          cat "$CFG/ModsConfig.xml"
+
+          # Switch files. The directory is root-owned, so the mod's file log cannot be opened and Refl
+          # falls back to stderr - which is where the run's log stream is read from.
+          SW=/data/data/com.ports1de.waylith/files/game
+          sudo mkdir -p "$SW"
+          echo off | sudo tee "$SW/agenttouchfix.dds" >/dev/null        # DdsFormatFix: inert
+          echo off | sudo tee "$SW/agenttouchfix.ddsalt" >/dev/null     # this module: inert
+
+          export DOTNET_STARTUP_HOOKS="$PWD/ddsfix/bin/Release/net10.0/DdsFixProbe.dll"
+          export MODCHECK_DEF=Gun_Revolver_LeakExt
+          export PROBE_TIMEOUT_MS=180000
+          export MODCHECK_DDS=1
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[MODCHECK\]|^\[AgentTouchFix\]' "$PWD/../out/a.log" > "$PWD/../out/a.txt" || true
+          grep -a 'ddsalt:' "$PWD/../out/a.txt" || true
+
+      - name: "B) same fixtures with DdsFormatFixAlt armed"
+        run: |
+          set -euo pipefail
+          SW=/data/data/com.ports1de.waylith/files/game
+          sudo rm -f "$SW/agenttouchfix.ddsalt"
+
+          export DOTNET_STARTUP_HOOKS="$PWD/ddsfix/bin/Release/net10.0/DdsFixProbe.dll"
+          export MODCHECK_DEF=Gun_Revolver_LeakExt
+          export PROBE_TIMEOUT_MS=180000
+          export MODCHECK_DDS=1
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[MODCHECK\]|^\[AgentTouchFix\]' "$PWD/../out/b.log" > "$PWD/../out/b.txt" || true
+          grep -a 'ddsalt:' "$PWD/../out/b.txt" | head -30 || true
+
+      - name: Gate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, sys
+
+          def load(path):
+              text = open(path, encoding="utf-8", errors="replace").read()
+              rows = {}
+              for m in re.finditer(r"dds leaf=(\S+) hit=(\w+) name='([^']*)' size=(\S+) fmt=(\S+)' (.*)", text):
+                  leaf, hit, name, size, fmt, stats = m.groups()
+                  def num(key, default=None):
+                      mm = re.search(key + r"=\(?([-\d.]+)", stats)
+                      return float(mm.group(1)) if mm else default
+                  rows[leaf] = dict(hit=hit == "True", name=name, size=size, fmt=fmt, stats=stats,
+                                    lum=num("lumSd"), alpha0=num("alpha0"), meanA=num("meanA"),
+                                    mips=num("mips", 1), mip1=num("mip1lum"))
+              return text, rows
+
+          def channels(stats):
+              m = re.search(r"meanRGB=\(([-\d.]+),([-\d.]+),([-\d.]+)\)", stats)
+              return tuple(float(x) for x in m.groups()) if m else None
+
+          def brightest(stats):
+              ch = channels(stats)
+              return max(ch) if ch else None
+
+          def variants(text):
+              m = re.search(r"fresh variants=(\d+) masks=(\d+)", text)
+              return (int(m.group(1)), int(m.group(2))) if m else None
+
+          def multi(text):
+              m = re.search(r"multi path=\S+ resolved=(\d)/4", text)
+              return int(m.group(1)) if m else None
+
+          def case(text, key):
+              m = re.search(r"case key=" + re.escape(key) + r" hit=(\w+)", text)
+              return m.group(1) == "True" if m else None
+
+          def repairs(text):
+              return [l for l in text.splitlines() if "ddsalt: repaired" in l]
+
+          def repaired(text, leaf):
+              return any(leaf in l for l in repairs(text))
+
+          c_text, c = load("out/c.txt")
+          a_text, a = load("out/a.txt")
+          b_text, b = load("out/b.txt")
+          problems = []
+
+          def fail(msg):
+              print("FAIL: " + msg)
+              problems.append(msg)
+
+          def dump(title, text, rows):
+              print("=== %s ===" % title)
+              print("variants:", variants(text), " multi:", multi(text), " repairs:", len(repairs(text)))
+              for leaf, row in sorted(rows.items()):
+                  print(f"  {leaf:12s} hit={row['hit']!s:5s} size={row['size']:9s} fmt={row['fmt']:9s} {row['stats']}")
+
+          dump("C) shipped loader, no GlyphFix", c_text, c)
+          dump("A) GlyphFix, both DDS modules off", a_text, a)
+          dump("B) GlyphFix, DdsFormatFixAlt armed", b_text, b)
+          for line in repairs(b_text):
+              print("  mod | " + line.split("ddsalt: ", 1)[1][:160])
+
+          # ---- the module really ran, and only in B
+          if "ddsalt: armed" not in b_text:
+              fail("the module never armed in B (no 'ddsalt: armed' line)")
+          if "ddsalt: disabled" not in a_text:
+              fail("the module did not report being switched off in A")
+          if repairs(a_text) or repairs(c_text):
+              fail("a repair line appeared in A or C, so B is not isolated")
+          if len(repairs(b_text)) < 4:
+              fail(f"only {len(repairs(b_text))} repair line(s) in B; expected at least 4 of the 5 repairable fixtures")
+
+          # ---- the two pre-existing gates, as a pair: 10/5 -> 5/0 and 0/4 -> 4/4
+          if variants(c_text) != (10, 5):
+              fail(f"the shipped loader should show 10/5 variants, got {variants(c_text)}")
+          if variants(b_text) != (5, 0):
+              fail(f"patched variants should be 5/0, got {variants(b_text)}")
+          if variants(a_text) != variants(b_text):
+              fail(f"switching this module off changed the variant count ({variants(a_text)} vs {variants(b_text)})")
+          if multi(c_text) != 0:
+              fail(f"the shipped loader should resolve 0/4, got {multi(c_text)}")
+          if multi(b_text) != 4:
+              fail(f"patched multi should resolve 4/4, got {multi(b_text)}")
+          if multi(a_text) != multi(b_text):
+              fail(f"switching this module off changed the multi count ({multi(a_text)} vs {multi(b_text)})")
+
+          # ---- the case fallback (this module must not disturb it)
+          if case(a_text, "Things/Pawn/Animal/Ibex/IbexMale_east") is not True:
+              fail("IbexMale_east should hit with the mod installed (case fallback)")
+          for key, label in [
+              ("Things/Pawn/Animal/Ibex/IbexMale_east", "Ibex (Male vs MALE)"),
+              ("Things/WeaponMelee/LongSword", "LongSword vs Longsword"),
+              ("Things/Projectile/Bullet_big", "Bullet_big vs Bullet_Big"),
+          ]:
+              hitC, hitB = case(c_text, key), case(b_text, key)
+              print(f"case {label}: no-mod={hitC} patched={hitB}")
+              if hitB is not True:
+                  fail(f"case fallback did not fire for {label}")
+          for key in ["Things/Pawn/Animal/Ibex/IbexMALE_east", "Things/WeaponMelee/Longsword",
+                      "Things/Projectile/Bullet_Big"]:
+              if case(b_text, key) is not True:
+                  fail(f"exact key {key} should still hit")
+
+          # ---- Bc5 (dxgi 80 = BC4): the shipped loader files it as BC7 and GetPixels32 dies
+          if "Bc7" not in b or not b["Bc7"]["hit"] or b["Bc7"]["size"] != "128x128" or b["Bc7"]["fmt"] != "BC7":
+              fail("Bc7 (dxgi 98) must stay a 128x128 BC7 load - the loader's own mapping is right")
+          bc5c, bc5a, bc5b = c.get("Bc5"), a.get("Bc5"), b.get("Bc5")
+          if bc5a is None or bc5b is None or bc5c is None:
+              fail("Bc5 line missing")
+          else:
+              print("shipped-loader Bc5: fmt=%s %s" % (bc5c["fmt"], bc5c["stats"]))
+              if "IndexOutOfRange" not in bc5c["stats"] and bc5c["fmt"] != "BC7":
+                  print("note: the shipped loader no longer fails Bc5 the way it was measured")
+              if bc5a["stats"] != bc5c["stats"] or bc5a["fmt"] != bc5c["fmt"]:
+                  fail("with the module switched off Bc5 must behave exactly like the shipped loader")
+              if not bc5b["hit"] or bc5b["size"] != "128x128":
+                  fail(f"Bc5 should load 128x128 with the prefix, got {bc5b['size']} hit={bc5b['hit']}")
+              if "px!" in bc5b["stats"]:
+                  fail("Bc5 GetPixels32 still throws with the prefix: " + bc5b["stats"])
+              if bc5b["fmt"] == "BC7":
+                  fail("Bc5 must not stay BC7-labelled (that is the defect)")
+              if bc5b["lum"] is None or bc5b["lum"] <= 2:
+                  fail(f"Bc5 pixels look flat (lumSd={bc5b['lum']}), not decoded art")
+              if not repaired(b_text, "Bc5.dds"):
+                  fail("Bc5.dds was not repaired by this module")
+              # A BC4 block is one channel. The port samples it as (R,0,0,1), so a correct decode has
+              # G == B == 0 and a non-zero R; a grey fill, a BC7 misread or a placeholder does not.
+              ch = channels(bc5b["stats"])
+              if ch is None:
+                  fail("Bc5 has no pixel statistics")
+              else:
+                  r, g, bb = ch
+                  print(f"Bc5 channels: R={r:.1f} G={g:.1f} B={bb:.1f}")
+                  if r <= 1:
+                      fail(f"Bc5 R channel is empty ({r}) - the single channel was not decoded")
+                  if g > 0.1 or bb > 0.1:
+                      fail(f"Bc5 G/B should be 0 (BC4 has one channel), got G={g} B={bb}")
+                  s5, s7 = brightest(bc5b["stats"]), brightest(b.get("Bc7", {}).get("stats", ""))
+                  if s5 is not None and s7:
+                      ratio = max(s5, s7) / max(1e-6, min(s5, s7))
+                      print(f"brightest channel: Bc5={s5:.1f} Bc7={s7:.1f} ratio={ratio:.2f}")
+                      if ratio > 3.0:
+                          fail(f"Bc5 brightest channel {s5:.1f} is not the same order as Bc7 {s7:.1f}")
+              if bc5b["meanA"] is not None and bc5b["meanA"] < 254.9:
+                  fail(f"Bc5 must be fully opaque, meanA={bc5b['meanA']}")
+
+          # ---- DXT3 128x128: BadTex in C/A, a real texture with alpha in B
+          d3c, d3b = c.get("Dxt3"), b.get("Dxt3")
+          if d3c is not None:
+              print("shipped-loader Dxt3: hit=%s size=%s fmt=%s" % (d3c["hit"], d3c["size"], d3c["fmt"]))
+              if d3c["size"] == "128x128" and "px!" not in d3c["stats"]:
+                  print("note: the shipped loader already reads DXT3 - the fixture no longer reproduces it")
+          if d3b is None:
+              fail("Dxt3 line missing")
+          else:
+              if not d3b["hit"] or d3b["size"] != "128x128":
+                  fail(f"Dxt3 should be a real 128x128 texture, got size={d3b['size']} hit={d3b['hit']}")
+              if "px!" in d3b["stats"]:
+                  fail("Dxt3 GetPixels32 throws: " + d3b["stats"])
+              if d3b["fmt"] != "RGBA32":
+                  fail(f"Dxt3 must be uploaded as RGBA32 (no DXT3 member exists), got {d3b['fmt']}")
+              if d3b["lum"] is None or d3b["lum"] <= 2:
+                  fail(f"Dxt3 pixels look flat (lumSd={d3b['lum']})")
+              if d3b["alpha0"] is None or d3b["alpha0"] <= 0:
+                  fail(f"Dxt3 lost its 4-bit alpha (alpha0={d3b['alpha0']})")
+              if d3b["meanA"] is None or not (30 <= d3b["meanA"] <= 225):
+                  fail(f"Dxt3 mean alpha should follow the alpha ramp, got {d3b['meanA']}")
+              if not repaired(b_text, "Dxt3.dds"):
+                  fail("Dxt3.dds was not repaired by this module")
+              if d3b["mips"] < 2:
+                  fail(f"Dxt3 got {d3b['mips']:.0f} level(s); an 8-level source needs 8")
+              if d3b["mip1"] is None or d3b["mip1"] <= 1:
+                  fail(f"Dxt3 level 1 is empty (mip1lum={d3b['mip1']})")
+
+          # ---- a one-level source: the chain is filled on the CPU, so icon-size sampling sees art
+          m1c, m1 = c.get("Mip1"), b.get("Mip1")
+          if m1c is not None:
+              print("shipped-loader Mip1: hit=%s size=%s mips=%s" % (m1c["hit"], m1c["size"], m1c["mips"]))
+          if m1 is None or not m1["hit"] or m1["size"] != "128x128":
+              fail(f"Mip1 (1-level DXT3, 128x128) should be repaired, got {m1 and m1['size']}")
+          else:
+              if "px!" in m1["stats"]:
+                  fail("Mip1 GetPixels32 throws: " + m1["stats"])
+              if m1["mips"] < 2:
+                  fail(f"Mip1 has {m1['mips']:.0f} level(s); a 1-level source needs a filled chain")
+              if m1["mip1"] is None or m1["mip1"] <= 1:
+                  fail(f"Mip1 level 1 is empty (mip1lum={m1['mip1']}) - downscaled sampling shows nothing")
+              if m1["alpha0"] is None or m1["alpha0"] <= 0:
+                  fail(f"Mip1 lost its alpha (alpha0={m1['alpha0']})")
+              if not repaired(b_text, "Mip1.dds"):
+                  fail("Mip1.dds was not repaired by this module")
+              print(f"Mip1: mips={m1['mips']:.0f} mip1lum={m1['mip1']}")
+
+          # ---- BC3 behind a DX10 header: created as BC7 by the loader, uploaded as DXT5 or decoded
+          shc, shb = c.get("Shadow"), b.get("Shadow")
+          if shc is not None:
+              print("shipped-loader Shadow: fmt=%s %s" % (shc["fmt"], shc["stats"][:80]))
+          if shb is None or not shb["hit"] or shb["size"] != "128x128":
+              fail(f"Shadow (DX10 BC3) should be a real 128x128 texture, got {shb and shb['size']}")
+          else:
+              if "px!" in shb["stats"]:
+                  fail("Shadow GetPixels32 throws: " + shb["stats"])
+              if shb["fmt"] == "BC7":
+                  fail("Shadow must not stay BC7-labelled (dxgi 77 is BC3)")
+              if shb["lum"] is None or shb["lum"] <= 2:
+                  fail(f"Shadow pixels look flat (lumSd={shb['lum']})")
+              if not repaired(b_text, "Shadow.dds"):
+                  fail("Shadow.dds was not repaired by this module")
+              line = [l for l in repairs(b_text) if "Shadow.dds" in l]
+              if line and "native" in line[0]:
+                  print("Shadow took the native DXT5 upload")
+              elif line:
+                  print("NOTE: the DXT5 read-back probe declined this port's native path; Shadow was "
+                        "decoded to RGBA32 instead (same pixels, 4x memory)")
+          pg = b.get("PngOnly")
+          if pg is None or not pg["hit"] or pg["size"] in ("2x2", "-"):
+              fail("PngOnly should keep loading as a real texture")
+
+          # ---- DXT1 punch-through: the holes must survive, and the file must not go up as DXT1
+          d1b = b.get("Dxt1Alpha")
+          if d1b is None or not d1b["hit"] or d1b["size"] != "8x8":
+              fail(f"Dxt1Alpha should load 8x8, got {d1b and d1b['size']}")
+          else:
+              if d1b["fmt"] in ("DXT1", "DXT1Crunched"):
+                  fail(f"Dxt1Alpha still uploaded as {d1b['fmt']} (BC1_RGB has alpha == 1)")
+              if d1b["alpha0"] != 16:
+                  fail(f"Dxt1Alpha must keep 16 of 64 texels at alpha 0, got {d1b['alpha0']}")
+
+          if problems:
+              print("\n%d check(s) failed" % len(problems))
+              sys.exit(1)
+          print("\nall ddsprefix gates passed")
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddsprefix-${{ github.run_id }}
+          path: |
+            out/*.log
+            out/*.txt
+            out/fixtures/*.dds
+            out/dll-md5.txt
+            run/Mods/glyphfix/Assemblies/GlyphFix.dll
+          if-no-files-found: warn
