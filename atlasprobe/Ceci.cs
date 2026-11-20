@@ -153,9 +153,9 @@ namespace AtlasProbe
             // 3. recovery can only read the cache, never the source file
             bool cacheOnly = requireCpu != null && Calls(requireCpu, "GpuTextureService", "TryLoadTextureFromCache")
                                        && !CallsAny(requireCpu, null, "LoadTextureFromFile", "LoadTextureFromFileAsync");
-            C("Texture2D::RequireCpuData reloads from the texture cache only (never the source file)", cacheOnly);
+            C("Texture2D::RequireCpuData re-reads through TryLoadTextureFromCache (cache first, then a source-file decode)", cacheOnly);
             if (cacheOnly)
-                F("`Waylith.Rendering/Texture2D.cs:162-172` - RequireCpuData calls `GpuTextureService.TryLoadTextureFromCache(SourcePath, ...)`; there is no path back to `LoadTextureFromFile`, so a released CPU copy with no cache entry is unrecoverable even though the PNG/DDS is still on disk.");
+                F("`Waylith.Rendering/Texture2D.cs:162-172` - RequireCpuData calls `GpuTextureService.TryLoadTextureFromCache(SourcePath, ...)`, which does fall back to `LoadTextureFromFile(sourcePath)` when the cache misses (`GpuTextureService.cs:3001-3013`). So a released CPU copy IS recoverable from a loose file; the dead end is a SourcePath that `File.Exists` cannot see (a pack-virtual path) or a file that no longer decodes.");
 
             // 4. the rehydrate gate compares the cache format with the CPU format
             bool fmtGate = fromCache != null && Calls(fromCache, null, "get_Format") && Calls(fromCache, "Texture2D", "TryUploadFromSource");
@@ -231,6 +231,23 @@ namespace AtlasProbe
             C("GpuTextureService::CreateTexture2D never reaches ClearColorImage, even on its empty-levels return", !createClears);
             if (emptyClears && !createClears)
                 F("`Waylith.Rendering/GpuTextureService.cs:592-597` - `clearable = !IsDepthFormat && !(format >= Bc1RGBUNormBlock && format <= Bc7SRGBBlock)`: every BC image skips `vkCmdClearColorImage` and is left holding whatever VMA handed out. `CreateTexture2D` (GpuTextureService.cs:376-390) has no clear at all on its `levels.Length == 0` early return (it only transitions the layout).");
+
+            // 10b. the mesh sampler is allowed to read every mip level
+            var mbr = W.MainModule.GetType("Waylith.Rendering.MeshBatchRenderer");
+            MethodDefinition sampler = null;
+            if (mbr != null)
+                foreach (var m in mbr.Methods)
+                {
+                    if (!m.HasBody) continue;
+                    bool maxValue = Body(m).Any(i => i.Operand is FieldReference f && f.Name == "MaxValue" && f.DeclaringType.Name == "Single");
+                    bool creates = Calls(m, null, "CreateSampler");
+                    bool trilinear = Body(m).Any(i => i.Operand is FieldReference f && f.Name == "Trilinear");
+                    if (maxValue && creates) { sampler = m; if (trilinear) break; }
+                }
+            C("MeshBatchRenderer plumbs MaxLod=float.MaxValue into the mesh sampler (the sampler may read any mip)", sampler != null,
+              sampler == null ? "not found" : sampler.Name);
+            if (sampler != null)
+                F("`Waylith.Rendering/MeshBatchRenderer.cs:1270-1295` (" + sampler.Name + ") - the mesh sampler is created with `MipmapMode=Linear` for FilterMode.Trilinear and `MaxLod=float.MaxValue`, `MinLod=minimumMipmapLevel`. Texture2D.NewFileTexture sets exactly Trilinear + aniso 2 (Texture2D.cs:773-774), so a minified draw of any texture is allowed to fetch levels 1..MipCount-1.");
 
             // 11. residency frame order
             var gpuRes = M(W, "Waylith.Rendering.Texture", "get_GpuResource");
