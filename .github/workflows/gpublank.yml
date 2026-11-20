@@ -1,0 +1,119 @@
+name: gpublank
+
+# Two independent proofs for "partial content blank" in the GPU upload / atlas / residency layer:
+#   probe   - executes the shipped StaticTextureAtlas packer + TexturePixelData format table headless,
+#             and reads the IL facts out of dlls/*.dll with Mono.Cecil (no game, no GPU)
+#   vulkan  - asks a real Vulkan implementation (lavapipe) what an unwritten mip level contains,
+#             which is the pixel a minified sample would fetch
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'atlasprobe/**'
+      - 'vk/mipblank.c'
+      - '.github/workflows/gpublank.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpublank-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Reference assemblies
+        run: |
+          for f in dlls/Waylith.dll dlls/Assembly-CSharp.dll dlls/UnityStubs.dll dlls/Mono.Cecil.dll; do
+            printf '%s %s bytes md5 %s\n' "$f" "$(stat -c%s "$f")" "$(md5sum "$f" | cut -d' ' -f1)"
+          done
+
+      - name: Build
+        run: dotnet build atlasprobe/AtlasProbe.csproj -c Release -v minimal
+
+      - name: Probe
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p atlasprobe/out
+          dotnet run --project atlasprobe/AtlasProbe.csproj -c Release --no-build -- \
+            --dlls dlls --table atlasprobe/out/gpublank.md | tee atlasprobe/out/gpublank.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## gpublank/probe — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- Waylith.dll: $(stat -c%s dlls/Waylith.dll) bytes, md5 \`$(md5sum dlls/Waylith.dll | cut -d' ' -f1)\`"
+            echo ""
+            echo '```'
+            grep -E '^\[(FACT|REAL|MODEL|FINDING|OBSERVED|PASS|FAIL|SKIP|BROKEN)\]|^(RESULT|assertions|DEVICE|CASE)' atlasprobe/out/gpublank.log || true
+            echo '```'
+            echo ""
+            cat atlasprobe/out/gpublank.md 2>/dev/null || echo "_no table_"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print failures
+        if: failure()
+        run: |
+          echo "=== failures ==="
+          grep -E '^\[(FAIL|BROKEN|SKIP)\]|^RESULT' atlasprobe/out/gpublank.log || true
+          echo "=== tail ==="
+          tail -n 80 atlasprobe/out/gpublank.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpublank-probe-${{ github.run_id }}
+          path: |
+            atlasprobe/out/gpublank.md
+            atlasprobe/out/gpublank.log
+          if-no-files-found: warn
+
+  vulkan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install software Vulkan
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libvulkan-dev vulkan-tools mesa-vulkan-drivers
+
+      - name: Find the software ICD
+        run: |
+          ICD=$(find /usr -name 'lvp_icd*.json' 2>/dev/null | head -1)
+          echo "found ICD: ${ICD:-none}"
+          echo "ICD=$ICD" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: gcc -O2 -std=c11 -Wall -Wextra -o build-mipblank vk/mipblank.c -lvulkan
+
+      - name: What is in an unwritten mip
+        run: |
+          if [ -n "${ICD:-}" ]; then export VK_ICD_FILENAMES="$ICD"; fi
+          ./build-mipblank | tee mipblank.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## gpublank/vulkan — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo '```'
+            cat mipblank.log 2>/dev/null || echo "_no log_"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
