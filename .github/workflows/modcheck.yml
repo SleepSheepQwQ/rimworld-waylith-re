@@ -70,6 +70,8 @@ jobs:
           cp ddsfix/png_only.png run/Mods/DdsProbe/Textures/Things/DdsProbe/PngOnly.png
           cp ddsfix/shadow.png   run/Mods/DdsProbe/Textures/Things/DdsProbe/Shadow.png
           cp ddsfix/shadow.dds   run/Mods/DdsProbe/Textures/Things/DdsProbe/Shadow.dds
+          # case fixture: the pack ships "IbexMALE_east", the def asks for "IbexMale_east"
+          cp ddsfix/png_only.png run/Mods/DdsProbe/Textures/Things/DdsProbe/IbexMALE_east.png
           ls -l run/Mods/DdsProbe/Textures/Things/DdsProbe
 
       - name: "A) control: leak layout without GlyphFix"
