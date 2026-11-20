@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
-          dotnet build modcheck/ModCheck.csproj -c Release -v minimal
+          dotnet build ddsfix/DdsFixProbe.csproj -c Release -v minimal
           dotnet build glyphfix/mod/AgentTouchFix.csproj -c Release -v minimal
           DLL=glyphfix/mod/bin/Release/net10.0/GlyphFix.dll
           test -f "$DLL"
@@ -118,7 +118,7 @@ jobs:
           sed 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>\n    <li>waylith.ddsprobe</li>#' \
             ci/ModsConfig.leak.xml > "$CFG/ModsConfig.xml"
           cat "$CFG/ModsConfig.xml"
-          export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
+          export DOTNET_STARTUP_HOOKS="$PWD/ddsfix/bin/Release/net10.0/DdsFixProbe.dll"
           export MODCHECK_DEF=Gun_Revolver_LeakExt
           export PROBE_TIMEOUT_MS=180000
           export MODCHECK_DDS=1
@@ -133,7 +133,7 @@ jobs:
           sed 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>\n    <li>waylith.ddsprobe</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' \
             ci/ModsConfig.leak.xml > "$CFG/ModsConfig.xml"
           cat "$CFG/ModsConfig.xml"
-          export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
+          export DOTNET_STARTUP_HOOKS="$PWD/ddsfix/bin/Release/net10.0/DdsFixProbe.dll"
           export MODCHECK_DEF=Gun_Revolver_LeakExt
           export PROBE_TIMEOUT_MS=180000
           export MODCHECK_DDS=1
