@@ -104,8 +104,17 @@ jobs:
 
       - name: What is in an unwritten mip
         run: |
+          set -o pipefail
           if [ -n "${ICD:-}" ]; then export VK_ICD_FILENAMES="$ICD"; fi
-          ./build-mipblank | tee mipblank.log
+          vulkaninfo --summary 2>&1 | head -20 || true
+          ./build-mipblank 2>&1 | tee mipblank.log
+          echo "exit=${PIPESTATUS[0]} log_bytes=$(wc -c < mipblank.log)"
+
+      - name: Debug a crashed harness
+        if: failure()
+        run: |
+          ls -l build-mipblank || true
+          gdb -batch -ex run -ex bt --args ./build-mipblank 2>&1 | tail -40 || true
 
       - name: Job summary
         if: always()
