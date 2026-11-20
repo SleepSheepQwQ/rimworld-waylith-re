@@ -308,6 +308,14 @@ namespace AtlasFix
             P.L();
             var a2 = patched ? BakeAtlas("patched", facts, gpuReady) : null;
 
+            if (patched && a2 != null)
+            {
+                string after = ModuleState(patched);
+                P.Real("module state after the patched bake: " + after);
+                P.Ok("the module's own counters show it handled the bake", Num(after, "bakes") >= 1, after);
+                P.Ok("the module unregistered at least one tile", Num(after, "dropped") >= 1, after);
+            }
+
             P.L();
             P.L("## 5. Patched — replacement info");
             P.L();
@@ -847,6 +855,7 @@ namespace AtlasFix
                 P.Real("loaded " + asm.GetName().Name + " " + asm.GetName().Version + " from " + Path.GetFileName(modPath));
                 var t = asm.GetType("AgentTouchFix.AtlasBakeFix", false);
                 if (t == null) { P.L("[FAIL] AgentTouchFix.AtlasBakeFix not present in the assembly"); return false; }
+                _txAtlasType = t;
                 // The module installs itself from its static ctor ([StaticConstructorOnStartup]); running
                 // the ctor is exactly what StaticConstructorOnStartupUtility.CallAll() does.
                 RuntimeHelpers.RunClassConstructor(t.TypeHandle);
@@ -883,8 +892,16 @@ namespace AtlasFix
                     }
                     P.Real("Harmony.GetPatchInfo(StaticTextureAtlas.Bake) -> info=" + (info != null)
                            + " postfixes=" + postfixes + " owners=[" + owners + "]");
-                    if (info == null) P.Skip("Harmony patch info", "GetPatchInfo returned null; the module's own log lines are the evidence that it ran");
-                    else P.Ok("the patch is attached to the shipped method", owners.Contains("atlasbake"), "owners=[" + owners + "]");
+                    if (info != null)
+                    {
+                        P.Note("PatchInfo members: "
+                               + string.Join(" ", info.GetType()
+                                   .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                   .Select(x => x.FieldType.Name + " " + x.Name))
+                               + " | " + string.Join(" ", info.GetType()
+                                   .GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                   .Select(x => x.PropertyType.Name + " " + x.Name)));
+                    }
                 }
                 else P.Note("0Harmony not loaded; cannot read patch info");
 
@@ -1055,6 +1072,30 @@ namespace AtlasFix
                 sb.Append(x.GetType().Name).Append(": ").Append(x.Message);
             }
             return sb.ToString();
+        }
+
+        static string ModuleState(bool patched)
+        {
+            if (!patched) return "(not installed)";
+            try
+            {
+                var t = _txAtlasType;
+                var m = t?.GetMethod("Summary", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
+                return m?.Invoke(null, null) as string ?? "(no Summary)";
+            }
+            catch (Exception e) { return "(Summary threw " + e.GetType().Name + ")"; }
+        }
+
+        static Type _txAtlasType;
+
+        static int Num(string text, string key)
+        {
+            if (string.IsNullOrEmpty(text)) return -1;
+            int i = text.IndexOf(key + "=", StringComparison.Ordinal);
+            if (i < 0) return -1;
+            int j = i + key.Length + 1, k = j;
+            while (k < text.Length && char.IsDigit(text[k])) k++;
+            return k > j && int.TryParse(text.Substring(j, k - j), out int v) ? v : -1;
         }
 
         static string Argv(string[] argv, string name)
