@@ -70,6 +70,8 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq libstb-dev
+          # ci/assemble.sh converts the shipped .dds corpus with Pillow
+          python3 -m pip install --break-system-packages --quiet pillow
 
       # Release builds a module nobody calls: prove the one line is what makes the difference.
       - name: Wire the module in (one line, the exact line a release would carry)
