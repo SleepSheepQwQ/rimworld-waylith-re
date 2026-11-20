@@ -1,0 +1,81 @@
+name: packprobe
+
+# Drives the SHIPPED asset-pack / VFS layer (dlls/Waylith.dll + dlls/UnityStubs.dll) with packs
+# written by the SHIPPED AssetPackWriter, on a plain Linux runner: no game, no Unity, no GPU.
+# `ilsites` scans the shipped IL for the call sites of the pack predicates, so the probe's
+# "who asks this question" is read from the binary instead of guessed.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'packprobe/**'
+      - '.github/workflows/packprobe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build packprobe/PackProbe.csproj -c Release -v minimal
+
+      - name: Stage the pack reader's own dependency
+        run: |
+          OUT=packprobe/bin/Release/net10.0
+          DOTNET_DIR="$(dirname "$(readlink -f "$(command -v dotnet)")")"
+          HASHING="$(find "$DOTNET_DIR/sdk" -maxdepth 2 -name System.IO.Hashing.dll | sort | head -1)"
+          test -n "$HASHING"
+          cp "$HASHING" "$OUT"/
+          ls -l "$OUT"/Waylith.dll "$OUT"/UnityStubs.dll "$OUT"/System.IO.Hashing.dll
+
+      - name: Probe
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p packprobe/out
+          dotnet packprobe/bin/Release/net10.0/PackProbe.dll | tee packprobe/out/probe.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### packprobe'
+            echo
+            echo '```'
+            cat packprobe/out/probe.log 2>/dev/null || echo '(no log)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ilsites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build the IL scanner
+        run: dotnet build packprobe/ilsites/Ilsites.csproj -c Release -v minimal
+
+      - name: Scan
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p packprobe/out
+          dotnet packprobe/ilsites/bin/Release/net10.0/Ilsites.dll dlls | tee packprobe/out/ilsites.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### ilsites'
+            echo
+            echo '```'
+            cat packprobe/out/ilsites.log 2>/dev/null || echo '(no log)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
