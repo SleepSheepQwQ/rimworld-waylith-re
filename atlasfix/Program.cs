@@ -471,15 +471,26 @@ namespace AtlasFix
 
         static object MakeLive(int size)
         {
-            var fmt = Engine.TSimple("TextureFormat");
-            object rgba32 = Enum.Parse(fmt, "RGBA32");
-            var tex = Activator.CreateInstance(_tex2d, new[] { (object)size, size, rgba32, false });
+            // Pick the ctor by shape and take the TextureFormat enum from its own parameter type: a
+            // second type called TextureFormat elsewhere in the closure makes Enum.Parse produce a
+            // value the binder will not accept.
+            var ctor = _tex2d.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .First(c =>
+                {
+                    var ps = c.GetParameters();
+                    return ps.Length == 4 && ps[0].ParameterType == typeof(int) && ps[1].ParameterType == typeof(int)
+                           && ps[2].ParameterType.Name == "TextureFormat" && ps[3].ParameterType == typeof(bool);
+                });
+            object fmtValue = Enum.Parse(ctor.GetParameters()[2].ParameterType, "RGBA32");
+            var tex = ctor.Invoke(new object[] { size, size, fmtValue, false });
             R.Set(tex, "name", "atlasfix_live");
-            var c32 = Engine.TSimple("Color32");
+
+            var set = R.MExact(_tex2d, "SetPixels32", "Color32[]");
+            Type c32 = set.GetParameters()[0].ParameterType.GetElementType();
             var arr = Array.CreateInstance(c32, size * size);
-            for (int i = 0; i < arr.Length; i++)
-                arr.SetValue(Activator.CreateInstance(c32, new object[] { (byte)230, (byte)140, (byte)40, (byte)255 }), i);
-            R.Invoke(R.MExact(_tex2d, "SetPixels32", "Color32[]"), tex, new object[] { arr });
+            object px = Activator.CreateInstance(c32, new object[] { (byte)230, (byte)140, (byte)40, (byte)255 });
+            for (int i = 0; i < arr.Length; i++) arr.SetValue(px, i);
+            R.Invoke(set, tex, new object[] { arr });
             R.Invoke(R.M(_tex2d, "Apply", 2) ?? R.M(_tex2d, "Apply"), tex, new object[0]);
             return tex;
         }
@@ -493,23 +504,25 @@ namespace AtlasFix
             var core = Engine.T("Waylith.Rendering.Texture2D");
             var m = core?.GetMethod("NewFileTexture", BindingFlags.NonPublic | BindingFlags.Static);
             string missing = Path.Combine(Path.GetTempPath(), "atlasfix_missing_" + Guid.NewGuid().ToString("N") + ".png");
-            var fmt = Engine.T("Waylith.Graphics.Textures.LoadedTextureFormat") ?? Engine.TSimple("LoadedTextureFormat");
-            var sw = Engine.TSimple("TextureSwizzle");
+            var ps = m?.GetParameters();
+            Type fmtType = ps != null && ps.Length > 4 ? ps[4].ParameterType : null;
+            Type swType = ps != null && ps.Length > 8 ? ps[8].ParameterType : null;
             object coreTex;
-            if (m != null && fmt != null)
+            if (m != null && fmtType != null && fmtType.IsEnum)
             {
                 coreTex = R.Invoke(m, null, new object[]
                 {
-                    missing, missing, size, size, EnumOf(fmt, "Rgba32", "RGBA32", "Rgba"), 1, false, false,
-                    sw != null ? Activator.CreateInstance(sw) : null
+                    missing, missing, size, size, EnumOf(fmtType, "Rgba32", "RGBA32", "Rgba"), 1, false, false,
+                    swType != null ? Activator.CreateInstance(swType) : null
                 });
             }
             else
             {
                 // fallback shape: uninitialised CPU storage, no source path
-                var lf = fmt ?? Engine.TSimple("LoadedTextureFormat");
-                coreTex = Activator.CreateInstance(core, new object[]
-                    { size, size, EnumOf(lf, "Rgba32", "RGBA32", "Rgba"), false, 1, true });
+                var ctor2 = core.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .First(c => c.GetParameters().Length == 6 && c.GetParameters()[2].ParameterType.IsEnum);
+                coreTex = ctor2.Invoke(new object[]
+                    { size, size, EnumOf(ctor2.GetParameters()[2].ParameterType, "Rgba32", "RGBA32", "Rgba"), false, 1, true });
             }
             var ctor = _tex2d.GetConstructors(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)
                              .First(c => c.GetParameters().Length == 1
@@ -973,7 +986,12 @@ namespace AtlasFix
             {
                 var gen = Engine.T("Verse.GenTexture");
                 var m = gen == null ? null : R.M(gen, "GenerateMipmaps", 4);
-                if (m == null || Engine.Harmony == null) { P.Note("mip no-op not installed (method or 0Harmony missing)"); return; }
+                if (m == null || Engine.Harmony == null)
+                {
+                    P.Note("mip no-op not installed (genTexture=" + (gen != null) + " method=" + (m != null)
+                           + " harmony=" + (Engine.Harmony != null) + ")");
+                    return;
+                }
                 var htype = Engine.Harmony.GetType("HarmonyLib.Harmony");
                 var hmType = Engine.Harmony.GetType("HarmonyLib.HarmonyMethod");
                 object h = Activator.CreateInstance(htype, new object[] { "atlasfix.harness.mipnoop" });
