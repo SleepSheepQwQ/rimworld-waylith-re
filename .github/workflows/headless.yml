@@ -71,11 +71,15 @@ jobs:
           set -euo pipefail
           RUN_DIR="$PWD/run" bash ci/run.sh "$PWD/out/boot.log" -QuitAfterBoot -Verbose
 
-      - name: 2) boot + scenario (DefDatabase -> Map -> Widgets.GetIconFor)
+      - name: 2) boot + scenario (Play scene -> Map -> spawn -> Widgets.GetIconFor -> PNG)
         run: |
           set -euo pipefail
           export DOTNET_STARTUP_HOOKS="$PWD/ci/scenario/bin/Release/net10.0/HeadlessScenario.dll"
-          RUN_DIR="$PWD/run" bash ci/run.sh "$PWD/out/scenario.log" -QuitAfterBoot -Verbose
+          export SCENARIO_OUT="$PWD/out"
+          # No -QuitAfterBoot here: the hook runs the scenario to completion and shuts the process
+          # down itself (Root.Shutdown), and ci/run.sh's timeout is the backstop. QuitAfterBoot's
+          # 180-frame counter would otherwise race the map generator.
+          BOOT_TIMEOUT=420 RUN_DIR="$PWD/run" bash ci/run.sh "$PWD/out/scenario.log" -Verbose
 
       - name: Report + gate
         if: always()
@@ -89,8 +93,10 @@ jobs:
         run: |
           echo "=== boot.log tail ==="
           tail -n 60 out/boot.log || true
-          echo "=== scenario.log: scenario lines ==="
-          grep -aE '^\[SCENARIO\]' -A12 out/scenario.log | head -120 || true
+          echo "=== scenario assertions ==="
+          grep -aE '^\[SCENARIO\] assert=' out/scenario.log || true
+          echo "=== scenario.log tail ==="
+          grep -aE '^(\[SCENARIO\]|.*(Exception|Error).*)' out/scenario.log | tail -n 120 || true
           echo "=== crash reports ==="
           find "$HOME/.config/unity3d" -name 'crash-*.txt' -mmin -30 -exec sh -c 'echo "--- $1"; head -40 "$1"' _ {} \; || true
 
@@ -103,6 +109,8 @@ jobs:
             out/*.log
             out/*.md
             out/*.txt
+            out/*.png
+            out/icon.json
           if-no-files-found: warn
 
       - name: Upload the player log and crash reports

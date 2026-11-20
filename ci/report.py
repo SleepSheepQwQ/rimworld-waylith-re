@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # Reads the headless run logs and turns them into (a) a job summary and (b) an exit code.
-# The exit code is the result: a run that did not boot, or a scenario that did not print
-# RESULT=OK, fails the job instead of producing a green log nobody reads.
+# The exit code is the result: a run that did not boot, a map the game's own generator never
+# produced, an icon that is not one of the def's variants, or a scenario that did not print
+# RESULT=OK all fail the job instead of producing a green log nobody reads.
 import re
 import sys
 from pathlib import Path
@@ -35,8 +36,14 @@ version = re.search(r"INFO RimWorld (\S+ rev\d+)", boot)
 pack = re.search(r"Asset pack: (\d+) entries from '([^']+)'", boot)
 defs = re.findall(r"\[SCENARIO\] defs\.thingDefs=(\d+)", scen)
 uniques = re.findall(r"\[SCENARIO\] uniqueWeaponDefs=(\d+) (.*)", scen)
-map_line = re.search(r"\[SCENARIO\] map=(.*)", scen)
+variants = re.search(r"\[SCENARIO\] def\.variants=(\d+) names=(.*)", scen)
+map_line = re.search(r"\[SCENARIO\] map=(\w+)(.*)", scen)
+spawn_line = re.search(r"\[SCENARIO\] spawn=(.*)", scen)
 icon_line = re.search(r"\[SCENARIO\] icon=(.*)", scen)
+pixels_line = re.search(r"\[SCENARIO\] pixels=(.*)", scen)
+png_line = re.search(r"\[SCENARIO\] png=(.*)", scen)
+def_icon = re.search(r"\[SCENARIO\] defIcon=(.*)", scen)
+asserts = re.findall(r"\[SCENARIO\] assert=(\S+) ok=(true|false) ?(.*)", scen)
 result = re.search(r"\[SCENARIO\] RESULT=(\w+)", scen)
 wall = re.search(r"wall_seconds=([0-9.]+)", boot + scen)
 exit_code = re.search(r"exit_code=(-?\d+)", boot + scen)
@@ -51,6 +58,17 @@ if result is None:
     failures.append("scenario never printed RESULT=")
 elif result.group(1) != "OK":
     failures.append("scenario RESULT=" + result.group(1))
+if map_line is None:
+    failures.append("scenario never reported a map")
+elif map_line.group(1) != "OK":
+    failures.append("map the game generated: " + map_line.group(1) + map_line.group(2))
+if not asserts:
+    failures.append("scenario printed no assertions")
+for name, ok, detail in asserts:
+    if ok != "true":
+        failures.append("assert %s failed: %s" % (name, detail.strip()))
+if result is not None and result.group(1) == "OK" and not icon_line:
+    failures.append("RESULT=OK but no icon line")
 
 counts = {
     "ERROR": len(re.findall(r"^.*ERROR ", boot + scen, re.M)),
@@ -69,9 +87,19 @@ lines.append("| exit code | `%s` |" % (exit_code.group(1) if exit_code else "?")
 lines.append("| asset pack | `%s` |" % (pack.group(1) + " entries" if pack else "not mounted (-NoAssetPack)"))
 lines.append("| thing defs loaded | `%s` |" % (defs[0] if defs else "?"))
 lines.append("| unique-weapon defs | `%s` |" % (uniques[0][0] if uniques else "?"))
-lines.append("| map | `%s` |" % (map_line.group(1) if map_line else "not attempted"))
+lines.append("| def variants | `%s` |" % (variants.group(1) + " " + variants.group(2) if variants else "?"))
+lines.append("| map | `%s` |" % (map_line.group(1) + map_line.group(2) if map_line else "not attempted"))
+lines.append("| spawn | `%s` |" % (spawn_line.group(1) if spawn_line else "not attempted"))
 lines.append("| icon | `%s` |" % (icon_line.group(1) if icon_line else "not attempted"))
+lines.append("| pixels | `%s` |" % (pixels_line.group(1) if pixels_line else "not decoded"))
+lines.append("| png | `%s` |" % (png_line.group(1) if png_line else "not written"))
+lines.append("| def-level icon | `%s` |" % (def_icon.group(1) if def_icon else "not probed"))
 lines.append("| scenario result | `%s` |" % (result.group(1) if result else "MISSING"))
+lines.append("")
+lines.append("| assertion | result | detail |")
+lines.append("|---|---|---|")
+for name, ok, detail in asserts:
+    lines.append("| `%s` | %s | `%s` |" % (name, "ok" if ok == "true" else "**FAIL**", detail.strip().replace("|", "\\|")))
 lines.append("")
 lines.append("log noise: " + ", ".join("%s=%d" % (k, v) for k, v in counts.items()))
 
