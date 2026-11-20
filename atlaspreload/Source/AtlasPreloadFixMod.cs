@@ -22,6 +22,7 @@ namespace AtlasPreloadFix
         private const string P = "[ATLASFIX] ";
 
         private static readonly int BudgetMs = ReadBudget();
+        private static readonly bool Observe = Environment.GetEnvironmentVariable("ATLASFIX_OBSERVE") == "1";
         private static bool _installed;
         private static bool _disabled;
         private static double _probeMs;
@@ -64,7 +65,12 @@ namespace AtlasPreloadFix
                 }
 
                 _installed = true;
-                Console.Error.WriteLine($"{P}install OK target=StaticTextureAtlas.Bake(bool) summary={(all != null ? 1 : 0)}");
+                Console.Error.WriteLine($"{P}install OK target=StaticTextureAtlas.Bake(bool) summary={(all != null ? 1 : 0)} observe={(Observe ? 1 : 0)}");
+
+                if (Environment.GetEnvironmentVariable("ATLASFIX_SEED") == "1")
+                {
+                    SeedQueue();
+                }
 
                 if (Environment.GetEnvironmentVariable("ATLASFIX_SELFTEST") == "1")
                 {
@@ -74,6 +80,36 @@ namespace AtlasPreloadFix
             catch (Exception e)
             {
                 Console.Error.WriteLine($"{P}install EXC {e.GetType().Name}: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Test-only: put two live textures into the real build queue. The headless harness's own
+        /// content almost never reaches Bake (most of its textures are absent), so without this a
+        /// boot run cannot show a page at all. The "good" texture gets a sentinel GpuResource; the
+        /// "bad" one is a normal texture with no GPU service, which is exactly the state every
+        /// landed texture has on this host.
+        /// </summary>
+        private static void SeedQueue()
+        {
+            try
+            {
+                var good = new UnityEngine.Texture2D(8, 8, UnityEngine.TextureFormat.RGBA32, false)
+                {
+                    name = "AtlasPreload_SeedGood",
+                };
+                var bad = new UnityEngine.Texture2D(8, 8, UnityEngine.TextureFormat.RGBA32, false)
+                {
+                    name = "AtlasPreload_SeedBad",
+                };
+                bool forced = AtlasPreloadSelfTest.TryForceResident(good, Console.Error.WriteLine);
+                bool a = GlobalTextureAtlasManager.TryInsertStatic(TextureAtlasGroup.Meta, good, null);
+                bool b = GlobalTextureAtlasManager.TryInsertStatic(TextureAtlasGroup.Meta, bad, null);
+                Console.Error.WriteLine($"{P}seed group=Meta_False good_insert={a} bad_insert={b} good_forced={forced}");
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine($"{P}seed EXC {e.GetType().Name}: {e.Message}");
             }
         }
 
@@ -116,6 +152,16 @@ namespace AtlasPreloadFix
 
             try
             {
+                if (Observe)
+                {
+                    _pages++;
+                    _candidates += __instance.textures.Count;
+                    Console.Error.WriteLine(
+                        $"{P}page group={__instance.groupKey} cand={__instance.textures.Count} observe=1 " +
+                        $"left={__instance.textures.Count}");
+                    return;
+                }
+
                 int remaining = BudgetMs <= 0 ? 0 : (int)Math.Max(0, BudgetMs - _probeMs);
                 bool hasMask = __instance.groupKey.hasMask;
                 AtlasPreloadStats stats = AtlasPreloadPolicy.Apply(
