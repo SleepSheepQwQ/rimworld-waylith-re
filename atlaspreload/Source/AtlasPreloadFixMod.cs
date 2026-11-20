@@ -180,7 +180,17 @@ namespace AtlasPreloadFix
                     return;
                 }
 
-                int remaining = BudgetMs <= 0 ? 0 : (int)Math.Max(0, BudgetMs - _probeMs);
+                if (BudgetMs > 0 && _probeMs >= BudgetMs)
+                {
+                    _budgetPages++;
+                    _disabled = true;
+                    Console.Error.WriteLine(
+                        $"{P}page group={__instance.groupKey} cand={__instance.textures.Count} " +
+                        $"budget=1 skip=1 elapsed_ms={_probeMs:F2}");
+                    return;
+                }
+
+                int remaining = BudgetMs <= 0 ? 0 : (int)Math.Max(1, BudgetMs - _probeMs);
                 bool hasMask = __instance.groupKey.hasMask;
                 AtlasPreloadStats stats = AtlasPreloadPolicy.Apply(
                     __instance.textures, __instance.masks, hasMask, EnsureResident, remaining);
