@@ -122,7 +122,7 @@ namespace AtlasPreloadFix
                 int goodTile = atlas.TryGetTile(good, out _) ? 1 : 0;
                 int badTile = atlas.TryGetTile(bad, out _) ? 1 : 0;
                 Console.Error.WriteLine(
-                    $"{P}seed group=Meta_False good_forced={forced} good_tile={goodTile} " +
+                    $"{P}seed group=Meta_False good_forced={(forced ? 1 : 0)} good_tile={goodTile} " +
                     $"bad_tile={badTile} tiles={atlas.tiles.Count} textures={atlas.textures.Count}");
             }
             catch (Exception e)
