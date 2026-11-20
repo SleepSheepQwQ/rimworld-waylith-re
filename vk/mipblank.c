@@ -208,6 +208,9 @@ static Readback run_case(const char *name, VkFormat f, int uploadAllMips, int cl
 
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);   // a crash must not eat the markers
+    setvbuf(stderr, NULL, _IONBF, 0);
+    printf("STEP start\n");
     VkApplicationInfo app; memset(&app, 0, sizeof app);
     app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; app.apiVersion = VK_API_VERSION_1_1;
     app.pApplicationName = "mipblank";
@@ -217,6 +220,7 @@ int main(void)
     VkResult ir = vkCreateInstance(&ici, NULL, &inst);
     if (ir != VK_SUCCESS) { fprintf(stderr, "mipblank: vkCreateInstance -> %d (no ICD?)\n", (int)ir); return 2; }
 
+    printf("STEP instance ok\n");
     uint32_t n = 0; vkEnumeratePhysicalDevices(inst, &n, NULL);
     if (n == 0) { fprintf(stderr, "mipblank: no physical device\n"); return 2; }
     VkPhysicalDevice *pds = calloc(n, sizeof *pds);
@@ -227,6 +231,7 @@ int main(void)
            VK_VERSION_MAJOR(props.driverVersion), VK_VERSION_MINOR(props.driverVersion), VK_VERSION_PATCH(props.driverVersion),
            VK_VERSION_MAJOR(props.apiVersion), VK_VERSION_MINOR(props.apiVersion), VK_VERSION_PATCH(props.apiVersion));
     vkGetPhysicalDeviceMemoryProperties(phys, &mp);
+    printf("STEP physical device ok\n");
 
     uint32_t qn = 0; vkGetPhysicalDeviceQueueFamilyProperties(phys, &qn, NULL);
     VkQueueFamilyProperties *qf = calloc(qn, sizeof *qf);
@@ -246,9 +251,12 @@ int main(void)
     VkCommandPoolCreateInfo pci; memset(&pci, 0, sizeof pci);
     pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO; pci.queueFamilyIndex = qi;
     chk(vkCreateCommandPool(dev, &pci, NULL, &pool), "vkCreateCommandPool");
+    printf("STEP device ok\n");
 
     // the two shapes the engine actually creates for a 256x256 icon
+    printf("STEP running cases\n");
     Readback bc0 = run_case("bc1_mip0_only",    VK_FORMAT_BC1_RGB_UNORM_BLOCK, 0, 0, 2);
+    printf("STEP case1 done\n");
     Readback bcc = run_case("bc1_mip0_cleared", VK_FORMAT_BC1_RGB_UNORM_BLOCK, 0, 1, 2);
     Readback rg0 = run_case("rgba8_mip0_only",  VK_FORMAT_R8G8B8A8_UNORM,     0, 0, 2);
     Readback rga = run_case("rgba8_all_mips",   VK_FORMAT_R8G8B8A8_UNORM,     1, 0, 2);
