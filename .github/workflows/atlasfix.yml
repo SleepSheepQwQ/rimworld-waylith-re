@@ -83,8 +83,9 @@ jobs:
       - name: Software Vulkan, GLFW and a virtual display
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libvulkan1 libvulkan-dev vulkan-tools mesa-vulkan-drivers libglfw3-dev xvfb gcc
+          echo "== apt =="
+          sudo timeout 240 apt-get update -qq
+          sudo timeout 240 apt-get install -y -qq libvulkan1 libvulkan-dev vulkan-tools mesa-vulkan-drivers libglfw3-dev xvfb gcc
           ICD=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -1)
           if [ -z "$ICD" ]; then echo "no lavapipe ICD"; ls -l /usr/share/vulkan/icd.d; exit 1; fi
           echo "ICD=$ICD"
@@ -95,7 +96,9 @@ jobs:
             sudo ln -sf /usr/lib/x86_64-linux-gnu/libvulkan.so.1 /usr/lib/x86_64-linux-gnu/libvulkan.so
           fi
           ls -l /usr/lib/x86_64-linux-gnu/libvulkan.so*
-          vulkaninfo --summary 2>&1 | sed -n '1,30p'
+          echo "== vulkaninfo =="
+          timeout 30 vulkaninfo --summary 2>&1 | sed -n '1,25p' || echo "vulkaninfo did not return in 30s (ignored)"
+          echo "== done ==" 
 
       - name: 1) no device - negative control only
         run: |
