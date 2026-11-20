@@ -95,6 +95,16 @@ namespace AtlasProbe
             return best;
         }
 
+        /// <summary>GetProperty that survives a virtual/override pair (Texture.width vs Texture2D.width).</summary>
+        public static PropertyInfo Prop(Type t, string name)
+        {
+            var p = t.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                     .FirstOrDefault(x => x.Name == name);
+            if (p != null) return p;
+            return t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(x => x.Name == name);
+        }
+
         public static object Call(Type t, string name, params object[] args)
         {
             // tolerate optional parameters: a method may declare more parameters than we pass
@@ -276,14 +286,14 @@ namespace AtlasProbe
                 tex = Activator.CreateInstance(tex2d, new[] { (object)2048, 2048, Enum.Parse(gfmt, "R8G8B8A8_SRGB"), 3, f });
             }
             catch (Exception e) { R.Skip("new Texture2D(2048,2048,R8G8B8A8_SRGB,3,...): " + (e.InnerException?.Message ?? e.Message)); return; }
-            var coreProp = tex2d.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly).First(p => p.Name == "CoreTexture");
+            var coreProp = Engine.Prop(tex2d, "CoreTexture");
             var core = coreProp.GetValue(tex);
             var coreType = core.GetType();
-            var cpu = coreType.GetProperty("CpuData").GetValue(core);
-            bool linear = (bool)cpu.GetType().GetProperty("Linear").GetValue(cpu);
-            object fmt = cpu.GetType().GetProperty("Format").GetValue(cpu);
+            var cpu = Engine.Prop(coreType, "CpuData").GetValue(core);
+            bool linear = (bool)Engine.Prop(cpu.GetType(), "Linear").GetValue(cpu);
+            object fmt = Engine.Prop(cpu.GetType(), "Format").GetValue(cpu);
             string vk = ((Enum)Engine.Call(pixData, "ToVkFormat", fmt)).ToString();
-            int mips = (int)coreType.GetProperty("MipCount").GetValue(core);
+            int mips = (int)Engine.Prop(coreType, "MipCount").GetValue(core);
             R.Real($"new Texture2D(2048,2048,GraphicsFormat.R8G8B8A8_SRGB,3,DontInitializePixels|MipChain) -> CpuData.Format={fmt}, CpuData.Linear={linear}, MipCount={mips}, upload VkFormat={vk}");
             R.Assert("the sRGB request is recorded on CpuData (Linear == false)", !linear);
             R.Assert("...and is then dropped: the uploaded VkFormat is UNorm, not *SRGB", !vk.Contains("SRGB"), vk);
@@ -503,9 +513,9 @@ namespace AtlasProbe
                 insert.Invoke(at, new object[] { Activator.CreateInstance(tex2d, new object[] { w, h, Enum.Parse(texFmt, "ARGB32"), false }), null });
             var rects = (Array)atlasType.GetMethod("CalcRectsForAtlasNew", new[] { typeof(int) }).Invoke(at, new object[] { 1 });
             var page = atlasType.GetProperty("ColorTexture").GetValue(at);
-            int pw = (int)tex2d.GetProperty("width").GetValue(page);
-            int ph = (int)tex2d.GetProperty("height").GetValue(page);
-            int pm = (int)tex2d.GetProperty("mipmapCount").GetValue(page);
+            int pw = (int)Engine.Prop(tex2d, "width").GetValue(page);
+            int ph = (int)Engine.Prop(tex2d, "height").GetValue(page);
+            int pm = (int)Engine.Prop(tex2d, "mipmapCount").GetValue(page);
             L.Pages.Add($"{pw}x{ph}/{pm}m");
             var rs = ReadRects(rects);
             L.RectCount += rs.Count;
