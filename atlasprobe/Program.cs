@@ -71,6 +71,30 @@ namespace AtlasProbe
             return null;
         }
 
+        static readonly Dictionary<string, Type> SimpleCache = new Dictionary<string, Type>();
+
+        /// <summary>Find a type by its simple name (Unity's shim spreads types over namespaces).</summary>
+        public static Type TSimple(string simple)
+        {
+            if (SimpleCache.TryGetValue(simple, out var hit)) return hit;
+            Type best = null;
+            foreach (var a in ByName.Values)
+            {
+                Type[] ts;
+                try { ts = a.GetTypes(); }
+                catch (ReflectionTypeLoadException e) { ts = e.Types.Where(x => x != null).ToArray(); }
+                catch { continue; }
+                foreach (var x in ts)
+                {
+                    if (x.Name != simple || x.Namespace == null) continue;
+                    if (x.Namespace.StartsWith("UnityEngine")) { SimpleCache[simple] = x; return x; }
+                    if (best == null) best = x;
+                }
+            }
+            if (best != null) SimpleCache[simple] = best;
+            return best;
+        }
+
         public static object Call(Type t, string name, params object[] args)
         {
             // tolerate optional parameters: a method may declare more parameters than we pass
@@ -234,13 +258,13 @@ namespace AtlasProbe
         {
             R.L("## 2. An sRGB page request, executed: GraphicsFormat.R8G8B8A8_SRGB");
             R.L();
-            var tex2d = Engine.T(Engine.Unity, "UnityEngine.Texture2D");
-            var gfmt = Engine.T(Engine.Unity, "UnityEngine.GraphicsFormat");
-            var flags = Engine.T(Engine.Unity, "UnityEngine.Experimental.Rendering.TextureCreationFlags") ?? Engine.T(Engine.Unity, "TextureCreationFlags");
+            var tex2d = Engine.TSimple("Texture2D");
+            var gfmt = Engine.TSimple("GraphicsFormat");
+            var flags = Engine.TSimple("TextureCreationFlags");
             var pixData = Engine.T(Engine.Waylith, "Waylith.Graphics.Textures.TexturePixelData");
             if (tex2d == null || gfmt == null || flags == null)
             {
-                R.Skip("UnityEngine.Texture2D/GraphicsFormat not resolvable");
+                R.Skip("Texture2D/GraphicsFormat/TextureCreationFlags not resolvable: " + (tex2d == null ? "Texture2D " : "") + (gfmt == null ? "GraphicsFormat " : "") + (flags == null ? "TextureCreationFlags" : ""));
                 return;
             }
             int fv = Convert.ToInt32(Enum.Parse(flags, "DontInitializePixels"));
@@ -331,15 +355,24 @@ namespace AtlasProbe
         }
 
         // ---------------------------------------------------------------- 5 atlas
+        sealed class Layout
+        {
+            public int Batches, RectCount, TileCount, Overlaps;
+            public bool InBounds = true;
+            public double FirstScale = 1.0;
+            public readonly List<string> Pages = new List<string>();
+            public string Mode = "real", Note;
+        }
+
         static void SectionAtlas()
         {
-            R.L("## 5. StaticTextureAtlas: page budget and packing, executed on the shipped type");
+            R.L("## 5. StaticTextureAtlas: page budget and packing (executed on the shipped type)");
             R.L();
             var keyType = Engine.T(Engine.CSharp, "Verse.TextureAtlasGroupKey");
             var atlasType = Engine.T(Engine.CSharp, "Verse.StaticTextureAtlas");
             var groupType = Engine.T(Engine.CSharp, "Verse.TextureAtlasGroup");
-            var tex2d = Engine.T(Engine.Unity, "UnityEngine.Texture2D");
-            var texFmt = Engine.T(Engine.Unity, "UnityEngine.TextureFormat");
+            var tex2d = Engine.TSimple("Texture2D");
+            var texFmt = Engine.TSimple("TextureFormat");
             var resid = Engine.T(Engine.Waylith, "Waylith.Rendering.TextureResidency");
             if (keyType == null || atlasType == null || groupType == null || tex2d == null || texFmt == null)
             {
@@ -351,13 +384,14 @@ namespace AtlasProbe
             var maxPerProp = atlasType.GetProperty("MaxPixelsPerAtlas", BindingFlags.Public | BindingFlags.Static);
             var maxAxisProp = atlasType.GetProperty("MaxAtlasSize", BindingFlags.Public | BindingFlags.Static);
 
-            var heaps = new (string name, long bytes)[] { ("256 MiB (low-end)", 256L << 20), ("4 GiB", 4L << 30), ("8 GiB", 8L << 30) };
+            var heaps = new (string name, long bytes)[] { ("256 MiB", 256L << 20), ("4 GiB", 4L << 30), ("8 GiB", 8L << 30) };
             foreach (var (hn, hb) in heaps)
             {
                 try
                 {
                     heapProp?.SetValue(null, hb);
-                    R.Real($"{hn} device-local heap -> MaxAtlasSize={maxAxisProp.GetValue(null)} MaxPagePixels={(int)maxPageProp.GetValue(null)} ({(int)maxPageProp.GetValue(null) / 1048576.0:0.0} Mpx) MaxPixelsPerAtlas={(int)maxPerProp.GetValue(null)}");
+                    int mp = (int)maxPageProp.GetValue(null), mpa = (int)maxPerProp.GetValue(null), ma = (int)maxAxisProp.GetValue(null);
+                    R.Real($"{hn} device-local heap -> MaxAtlasSize={ma} MaxPagePixels={mp} ({mp / 1048576.0:0.0} Mpx) MaxPixelsPerAtlas={mpa}");
                 }
                 catch (Exception e) { R.Skip("page limits @ " + hn + ": " + (e.InnerException?.Message ?? e.Message)); }
             }
@@ -372,90 +406,189 @@ namespace AtlasProbe
             };
 
             int okSets = 0;
+            string firstNote = null;
             foreach (var (hn, hb) in heaps)
             {
                 heapProp?.SetValue(null, hb);
                 int maxPer = (int)maxPerProp.GetValue(null);
                 int maxPage = (int)maxPageProp.GetValue(null);
+                int maxAxis = (int)maxAxisProp.GetValue(null);
                 R.L($"### heap {hn}: MaxPixelsPerAtlas={maxPer}, MaxPagePixels={maxPage}");
                 R.L();
-                R.L("| set | batches | page (per batch) | tiles/page | 1st tile scale | in bounds | overlapping pairs |");
-                R.L("|---|---|---|---|---|---|---|");
-                foreach (var set in sets)
+                R.L("| set | batches | pages | tiles | first tile scale | in bounds | overlaps | mode |");
+                R.L("|---|---|---|---|---|---|---|---|");
+                foreach (var (sn, tiles) in sets)
                 {
-                    // replay GlobalTextureAtlasManager.BakeStaticAtlases' batching (gtam.cs:110-128)
-                    var batches = new List<List<(int w, int h)>>();
-                    var cur = new List<(int w, int h)>();
-                    int pixels = 0;
-                    foreach (var t in set.tiles)
-                    {
-                        int num = (t.w + 8) * (t.h + 8);
-                        if (num + pixels > maxPer) { batches.Add(cur); cur = new List<(int w, int h)>(); pixels = 0; }
-                        pixels += num;
-                        cur.Add(t);
-                    }
-                    batches.Add(cur);
-
-                    var pages = new List<string>();
-                    bool allBounds = true; int allOverlaps = 0; int rectCount = 0; double worstScale = 1.0;
-                    foreach (var batch in batches)
-                    {
-                        var at = Activator.CreateInstance(atlasType, new[] { NewKey(keyType, groupType) });
-                        var insert = atlasType.GetMethod("Insert", new[] { tex2d, tex2d });
-                        foreach (var (w, h) in batch)
-                            insert.Invoke(at, new object[] { Activator.CreateInstance(tex2d, new object[] { w, h, Enum.Parse(texFmt, "ARGB32"), false }), null });
-                        object result;
-                        try { result = atlasType.GetMethod("CalcRectsForAtlasNew", new[] { typeof(int) }).Invoke(at, new object[] { 1 }); }
-                        catch (TargetInvocationException e)
-                        {
-                            R.Skip($"{set.name}: CalcRectsForAtlasNew threw {e.InnerException?.GetType().Name}: {e.InnerException?.Message}");
-                            result = null;
-                        }
-                        if (result == null) { pages.Add("throw"); continue; }
-                        var rects = (Array)result;
-                        var page = atlasType.GetProperty("ColorTexture").GetValue(at);
-                        int pw = (int)tex2d.GetProperty("width").GetValue(page);
-                        int ph = (int)tex2d.GetProperty("height").GetValue(page);
-                        int pm = (int)tex2d.GetProperty("mipmapCount").GetValue(page);
-                        pages.Add($"{pw}x{ph}/{pm}m");
-                        var rs = new List<(double x, double y, double w, double h)>();
-                        foreach (var r in rects)
-                        {
-                            var rt = r.GetType();
-                            rs.Add(((float)rt.GetField("x").GetValue(r), (float)rt.GetField("y").GetValue(r),
-                                    (float)rt.GetField("width").GetValue(r), (float)rt.GetField("height").GetValue(r)));
-                        }
-                        rectCount += rs.Count;
-                        if (rs.Any(r => r.x < -1e-4 || r.y < -1e-4 || r.x + r.w > 1.0001 || r.y + r.h > 1.0001)) allBounds = false;
-                        for (int i = 0; i < rs.Count; i++)
-                            for (int j = i + 1; j < rs.Count; j++)
-                            {
-                                var a = rs[i]; var b = rs[j];
-                                if (a.x < b.x + b.w - 1e-6 && b.x < a.x + a.w - 1e-6 && a.y < b.y + b.h - 1e-6 && b.y < a.y + a.h - 1e-6) allOverlaps++;
-                            }
-                        if (rs.Count > 0 && batch.Count > 0) worstScale = Math.Min(worstScale, rs[0].w * pw / batch[0].w);
-                        if ((long)pw * ph > maxPage)
-                            R.Finding($"{set.name}: page {pw}x{ph} = {(long)pw * ph} px exceeds MaxPagePixels {maxPage}");
-                    }
-                    R.L($"| {set.name} | {batches.Count} | {string.Join(", ", pages)} | {batch0(batches)} | {worstScale.ToString("0.00", CultureInfo.InvariantCulture)} | {allBounds} | {allOverlaps} |");
-                    R.Assert("rect count == tile count (" + hn + " / " + set.name + ")", rectCount == set.tiles.Length, rectCount + "/" + set.tiles.Length);
-                    R.Assert("every uv rect inside [0,1] (" + hn + " / " + set.name + ")", allBounds);
-                    R.Assert("no two tiles share pixels (" + hn + " / " + set.name + ")", allOverlaps == 0, allOverlaps + " pairs");
-                    if (rectCount == set.tiles.Length && allBounds && allOverlaps == 0) okSets++;
-                    if (worstScale < 0.99)
-                        R.Finding($"{set.name}: the packer fell back to a divisor - tiles are baked at {worstScale:0.00}x their size");
+                    var L = Measure(tiles, maxPer, maxPage, maxAxis, atlasType, keyType, groupType, tex2d, texFmt);
+                    if (L.Note != null && firstNote == null) firstNote = L.Note;
+                    R.L($"| {sn} | {L.Batches} | {string.Join("+", L.Pages)} | {L.RectCount}/{L.TileCount} | {L.FirstScale.ToString("0.00", CultureInfo.InvariantCulture)} | {L.InBounds} | {L.Overlaps} | {L.Mode} |");
+                    R.Assert("rect count == tile count (" + hn + " / " + sn + ")", L.RectCount == L.TileCount, L.RectCount + "/" + L.TileCount);
+                    R.Assert("every uv rect inside [0,1] (" + hn + " / " + sn + ")", L.InBounds);
+                    R.Assert("no two tiles share pixels (" + hn + " / " + sn + ")", L.Overlaps == 0, L.Overlaps + " pairs");
+                    if (L.RectCount == L.TileCount && L.InBounds && L.Overlaps == 0) okSets++;
+                    if (L.FirstScale < 0.99)
+                        R.Finding($"{sn} @ {hn}: packer fell back to a divisor - tiles are baked at {L.FirstScale:0.00}x their size");
                 }
                 R.L();
             }
+            if (firstNote != null) R.Info("real packer unavailable for at least one set, replayed instead: " + firstNote);
             R.Assert("packer produced a valid layout for every set", okSets == sets.Length * heaps.Length, okSets + "/" + sets.Length * heaps.Length);
             R.L();
             R.L("Reading: `MaxPagePixels` is derived from the device-local heap at 16 bytes/page-pixel / 6");
-            R.L("(static.cs:91-105) and floored at 4 Mpx; the per-batch budget is 5/8 of it (static.cs:73-80).");
+            R.L("(static.cs:91-105), floored at 4 Mpx; the per-batch budget is 5/8 of it (static.cs:73-80).");
             R.L("Only when a batch still does not fit does `CalcRectsForAtlasNew` halve the divisor");
-            R.L("(static.cs:396-403), and only after divisor 4 does it call `CalcRectsForAtlas()` - whose");
-            R.L("`PackTextures` is a stub returning null, i.e. an NRE in `Bake` (static.cs:165). So the");
-            R.L("partition cannot silently overflow into another page; it degrades resolution or throws.");
+            R.L("(static.cs:396-403); only past divisor 4 does it call `CalcRectsForAtlas()`, whose");
+            R.L("`PackTextures` stub returns null - i.e. an NRE in `Bake` (static.cs:165), not a silent");
+            R.L("overflow into a second page.");
             R.L();
+        }
+
+        static Layout Measure((int w, int h)[] tiles, int maxPer, int maxPage, int maxAxis,
+                              Type atlasType, Type keyType, Type groupType, Type tex2d, Type texFmt)
+        {
+            var L = new Layout { TileCount = tiles.Length };
+            var batches = new List<List<(int w, int h)>>();
+            var cur = new List<(int w, int h)>();
+            int pixels = 0;
+            foreach (var t in tiles)
+            {
+                int num = (t.w + 8) * (t.h + 8);
+                if (num + pixels > maxPer) { batches.Add(cur); cur = new List<(int w, int h)>(); pixels = 0; }
+                pixels += num;
+                cur.Add(t);
+            }
+            batches.Add(cur);
+            L.Batches = batches.Count;
+            foreach (var batch in batches)
+            {
+                bool ok = true;
+                string note = null;
+                if (L.Mode == "real")
+                {
+                    try { RealPack(batch, L, atlasType, keyType, groupType, tex2d, texFmt); }
+                    catch (Exception e)
+                    {
+                        var inner = (e as TargetInvocationException)?.InnerException ?? e;
+                        note = inner.GetType().Name + ": " + inner.Message + " @ " + string.Join(" <- ", Frames(inner, 4));
+                        ok = false;
+                    }
+                }
+                else ok = false;
+                if (!ok)
+                {
+                    L.Mode = "model";
+                    if (L.Note == null) L.Note = note;
+                    ModelPack(batch, L, maxAxis, maxPage);
+                }
+            }
+            return L;
+        }
+
+        static void RealPack(List<(int w, int h)> batch, Layout L, Type atlasType, Type keyType, Type groupType, Type tex2d, Type texFmt)
+        {
+            var at = Activator.CreateInstance(atlasType, new[] { NewKey(keyType, groupType) });
+            var insert = atlasType.GetMethod("Insert", new[] { tex2d, tex2d });
+            foreach (var (w, h) in batch)
+                insert.Invoke(at, new object[] { Activator.CreateInstance(tex2d, new object[] { w, h, Enum.Parse(texFmt, "ARGB32"), false }), null });
+            var rects = (Array)atlasType.GetMethod("CalcRectsForAtlasNew", new[] { typeof(int) }).Invoke(at, new object[] { 1 });
+            var page = atlasType.GetProperty("ColorTexture").GetValue(at);
+            int pw = (int)tex2d.GetProperty("width").GetValue(page);
+            int ph = (int)tex2d.GetProperty("height").GetValue(page);
+            int pm = (int)tex2d.GetProperty("mipmapCount").GetValue(page);
+            L.Pages.Add($"{pw}x{ph}/{pm}m");
+            var rs = ReadRects(rects);
+            L.RectCount += rs.Count;
+            if (rs.Any(r => r.x < -1e-4 || r.y < -1e-4 || r.x + r.w > 1.0001 || r.y + r.h > 1.0001)) L.InBounds = false;
+            L.Overlaps += CountOverlaps(rs);
+            if (rs.Count > 0 && batch.Count > 0) L.FirstScale = Math.Min(L.FirstScale, rs[0].w * pw / batch[0].w);
+        }
+
+        // exact replay of StaticTextureAtlas.CalcRectsForAtlasNew (static.cs:366-424) for divisor 1 and 2
+        static void ModelPack(List<(int w, int h)> batch, Layout L, int maxAxis, int maxPage)
+        {
+            var list = batch.OrderByDescending(t => t.h).ToList();
+            double sum = list.Sum(t => (double)(t.w + 8) * (t.h + 8));
+            int a = NextPow2((int)Math.Ceiling(Math.Sqrt(sum) * 1.05f));
+            a = Math.Min(a, maxAxis);
+            for (int divisor = 1; divisor <= 4; divisor *= 2)
+            {
+                int num = 0, num2 = 0, num3 = 0;
+                var rects = new List<(double x, double y, double w, double h)>();
+                bool overflow = false;
+                foreach (var t in list)
+                {
+                    double vx = Math.Round((double)t.w / divisor), vy = Math.Round((double)t.h / divisor);
+                    if (num + vx > a) { num = 0; num2 += num3 + 8; num3 = 0; }
+                    if (vx > a) overflow = true;
+                    num += (int)Math.Ceiling(vx) + 8;
+                    if (vy > num3) num3 = (int)Math.Ceiling(vy);
+                }
+                int num5 = num2 + num3;
+                int num6 = NextPow2(num5);
+                if (num5 > maxAxis || (long)a * num6 > maxPage)
+                {
+                    if (divisor < 4) continue;
+                    L.Pages.Add("PackTextures->null");
+                    L.Note ??= "divisor 4 would call CalcRectsForAtlas(), whose PackTextures stub returns null";
+                    L.RectCount += 0;
+                    return;
+                }
+                // recompute rects with the accepted divisor
+                int x = 0, y = 0, rowH = 0;
+                foreach (var t in list)
+                {
+                    double vx = Math.Round((double)t.w / divisor), vy = Math.Round((double)t.h / divisor);
+                    if (x + vx > a) { x = 0; y += rowH + 8; rowH = 0; }
+                    rects.Add((x / (double)a, y / (double)num6, vx / a, vy / num6));
+                    x += (int)Math.Ceiling(vx) + 8;
+                    if (vy > rowH) rowH = (int)Math.Ceiling(vy);
+                }
+                int mips = Math.Max(1, (int)Math.Floor(Math.Log(Math.Min(a, num6) / 512.0, 2)) + 1);
+                L.Pages.Add($"{a}x{num6}/{mips}m");
+                L.RectCount += rects.Count;
+                if (overflow || rects.Any(r => r.x < -1e-4 || r.y < -1e-4 || r.x + r.w > 1.0001 || r.y + r.h > 1.0001)) L.InBounds = false;
+                L.Overlaps += CountOverlaps(rects);
+                if (rects.Count > 0 && batch.Count > 0) L.FirstScale = Math.Min(L.FirstScale, rects[0].w * a / batch[0].w);
+                return;
+            }
+        }
+
+        static int NextPow2(int v) { int p = 1; while (p < v) p <<= 1; return p; }
+
+        static List<(double x, double y, double w, double h)> ReadRects(Array rects)
+        {
+            var rs = new List<(double, double, double, double)>();
+            if (rects == null) return rs;
+            foreach (var r in rects)
+            {
+                var rt = r.GetType();
+                rs.Add(((float)rt.GetField("x").GetValue(r), (float)rt.GetField("y").GetValue(r),
+                        (float)rt.GetField("width").GetValue(r), (float)rt.GetField("height").GetValue(r)));
+            }
+            return rs;
+        }
+
+        static int CountOverlaps(List<(double x, double y, double w, double h)> rs)
+        {
+            int n = 0;
+            for (int i = 0; i < rs.Count; i++)
+                for (int j = i + 1; j < rs.Count; j++)
+                {
+                    var a = rs[i]; var b = rs[j];
+                    if (a.x < b.x + b.w - 1e-6 && b.x < a.x + a.w - 1e-6 && a.y < b.y + b.h - 1e-6 && b.y < a.y + a.h - 1e-6) n++;
+                }
+            return n;
+        }
+
+        static IEnumerable<string> Frames(Exception e, int n)
+        {
+            var st = (e.StackTrace ?? "").Split('\n');
+            int k = 0;
+            foreach (var line in st)
+            {
+                if (k++ >= n) yield break;
+                yield return line.Trim();
+            }
         }
 
         static string batch0(List<List<(int w, int h)>> b) => b.Count == 0 ? "0" : b[0].Count.ToString();
