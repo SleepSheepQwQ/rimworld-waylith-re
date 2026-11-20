@@ -72,7 +72,7 @@ jobs:
           test -f "$DLL"
           md5sum "$DLL" | tee out/dll-md5.txt
           stat -c '%n %s bytes' "$DLL" | tee -a out/dll-md5.txt
-          strings -a "$DLL" | grep -F 'BUILD 2.6.6 shadow' | head -1 | tee out/dll-build.txt
+          python3 -c "import sys; d=open('$DLL','rb').read(); n='BUILD 2.6.6 shadow'.encode('utf-16-le'); print('BUILD 2.6.6 shadow') if n in d else sys.exit('BUILD string missing from $DLL')" | tee out/dll-build.txt
 
       - name: Unit tests (DDS shadow decision table)
         run: dotnet test glyphfix/tests/TexSt/TexSt.csproj -c Release -v minimal
