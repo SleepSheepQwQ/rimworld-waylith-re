@@ -86,13 +86,45 @@ def main(out):
         if int(removed) > int(failed):
             print("FAIL: removed more than failures")
             ok = False
+    else:
+        ok = False
 
-        unbounded = os.path.join(out, "boot_fix_unbounded.log")
-        if os.path.exists(unbounded):
-            text = read(unbounded)
-            match = re.search(r"warmup_ms=([0-9.]+)", text)
-            if match:
-                print(f"unbounded warmup_ms={match.group(1)}")
+    # The seeded Meta page is the live A/B: observer keeps both textures in the tile map, the
+    # filter keeps the sentinel-resident one and drops the one with no GPU resource.
+    observe_path = os.path.join(out, "boot_observe.log")
+    if not os.path.exists(observe_path):
+        print("FAIL: missing observe run")
+        ok = False
+    else:
+        observe_text = read(observe_path)
+        if not re.search(r"page group=Meta_False cand=2 observe=1", observe_text):
+            print("FAIL: observe did not see the two seeded textures")
+            ok = False
+        if not re.search(r"tiles group=Meta_False count=2", observe_text):
+            print("FAIL: observe did not register both seeded tiles")
+            ok = False
+
+    fix_page = re.search(r"page group=Meta_False cand=2 resident=(\d+) fail=(\d+) maskfail=(\d+) "
+                         r"removed=(\d+) ", fixed_text)
+    if not fix_page:
+        print("FAIL: missing Meta page line in patched run")
+        ok = False
+    else:
+        fr, ff, fm, frm = map(int, fix_page.groups())
+        print(f"fix Meta page: resident={fr} fail={ff} maskfail={fm} removed={frm}")
+        if (fr, ff, frm) != (1, 1, 1):
+            print("FAIL: Meta page should be resident=1 fail=1 removed=1")
+            ok = False
+    if not re.search(r"tiles group=Meta_False count=1", fixed_text):
+        print("FAIL: patched run did not leave exactly one Meta tile")
+        ok = False
+
+    unbounded = os.path.join(out, "boot_fix_unbounded.log")
+    if os.path.exists(unbounded):
+        text = read(unbounded)
+        match = re.search(r"warmup_ms=([0-9.]+)", text)
+        if match:
+            print(f"unbounded warmup_ms={match.group(1)}")
 
     if overhead > MAX_OVERHEAD_S:
         print(f"FAIL: patched boot overhead {overhead:+.2f}s exceeds {MAX_OVERHEAD_S:.2f}s")
