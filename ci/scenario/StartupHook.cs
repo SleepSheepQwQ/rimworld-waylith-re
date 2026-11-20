@@ -311,6 +311,59 @@ internal static class StartupHook
 
             // ---- assertions -----------------------------------------------------------------
             Check("variants-five", variants.Count == 5, $"count={variants.Count} names={string.Join(",", variants)}");
+
+            // every variant, not only the one this thing drew: a real 128x128 texture with the
+            // expected name. If the folder were masks or placeholders these would not resolve.
+            var resolved = new List<string>();
+            Graphic_Collection coll = Collection(_target);
+            int collCount = coll == null ? 0 : coll.subGraphics.Length;
+            for (int i = 0; i < collCount; i++)
+            {
+                Texture2D vt = null;
+                try
+                {
+                    Material vm = coll.subGraphics[i].MatSingle;
+                    vt = vm == null ? null : vm.mainTexture as Texture2D;
+                }
+                catch { }
+                resolved.Add($"{i}:{(vt == null ? "<null>" : vt.name)}:{(vt == null ? "-" : vt.width + "x" + vt.height)}");
+                Check($"variant-{i}-texture",
+                      vt != null && vt.width == 128 && vt.height == 128 && variants.Contains(vt.name),
+                      $"name={(vt == null ? "<null>" : vt.name)} size={(vt == null ? "-" : vt.width + "x" + vt.height)}");
+            }
+            Console.Error.WriteLine($"{T} variantTextures={string.Join(",", resolved)}");
+
+            // a second thing of the same def: Graphic_Random picks by thingIDNumber, so the icon
+            // must follow the id, not be a constant for the def.
+            string name2 = "<none>";
+            int index2 = -1, pick2 = -1;
+            try
+            {
+                Thing second = ThingMaker.MakeThing(_target);
+                IntVec3 cell2;
+                if (!CellFinder.TryFindRandomCellNear(map.Center, map, 30, c => c.Standable(map), out cell2)) cell2 = map.Center;
+                GenSpawn.Spawn(second, cell2, map, WipeMode.Vanish);
+                float s2, a2;
+                Vector2 pr2;
+                Color c2;
+                Material m2;
+                Texture2D tex2 = Widgets.GetIconFor(second, new Vector2(128f, 128f), null, stackOfOne: false,
+                                                    out s2, out a2, out pr2, out c2, out m2) as Texture2D;
+                name2 = tex2 == null ? "<null>" : tex2.name;
+                index2 = variants.IndexOf(name2);
+                pick2 = (second.OverrideGraphicIndex ?? second.thingIDNumber) % Math.Max(1, variants.Count);
+                Console.Error.WriteLine($"{T} icon2=def={_target.defName} thingID={second.thingIDNumber} tex={name2} " +
+                                        $"size={(tex2 == null ? "-" : tex2.width + "x" + tex2.height)} " +
+                                        $"variantIndex={index2} expectedIndex={pick2} spawned={second.Spawned}");
+                Check("second-thing-variant", index2 == pick2 && index2 >= 0,
+                      $"thingID={second.thingIDNumber} picked={pick2} actual={index2}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"{T} icon2 stack:\n{ex}");
+                Check("second-thing-variant", false, "exception " + ex.GetType().Name);
+            }
+
             Check("icon-not-null", tex != null, $"tex={name}");
             Check("icon-not-badtex", !bad, $"badTex={bad}");
             Check("icon-not-placeholder", !placeholder, $"size={(tex == null ? "-" : tex.width + "x" + tex.height)}");
@@ -414,6 +467,14 @@ internal static class StartupHook
             Directory.CreateDirectory(d);
             return d;
         }
+    }
+
+    /// <summary>The def's Graphic_Collection (Graphic_Random), unwrapping Graphic_RandomRotated.</summary>
+    private static Graphic_Collection Collection(ThingDef def)
+    {
+        Graphic g = def.graphic;
+        if (g is Graphic_RandomRotated) g = ((Graphic_RandomRotated)g).subGraphic;
+        return g as Graphic_Collection;
     }
 
     /// <summary>The Graphic_Single sub-graphics of the def's Graphic_Random, as texture names.</summary>
