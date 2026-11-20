@@ -58,6 +58,31 @@ internal static class StartupHook
                 .Select(a => a.GetName().Name).ToList();
             Console.WriteLine($"{T} loadedAssemblies={string.Join(",", asms)} count={asms.Count}");
 
+            // Did the mod's types survive loading, and is the startup-attribute type among them?
+            try
+            {
+                System.Reflection.Assembly gf = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => a.GetName().Name == "GlyphFix");
+                if (gf != null)
+                {
+                    Type[] types;
+                    try { types = gf.GetTypes(); }
+                    catch (System.Reflection.ReflectionTypeLoadException rtle)
+                    {
+                        types = rtle.Types.Where(t => t != null).ToArray();
+                        Console.WriteLine($"{T} typeLoadErrors={rtle.LoaderExceptions.Length}");
+                        foreach (Exception le in rtle.LoaderExceptions.Take(3))
+                            Console.WriteLine($"{T}   loader={le.GetType().Name}: {le.Message}");
+                    }
+                    Console.WriteLine($"{T} glyphfixTypes={types.Length} hasBootstrap={types.Any(t => t.FullName == "AgentTouchFix.Bootstrap")}");
+                    var attr = AppDomain.CurrentDomain.GetAssemblies()
+                        .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                        .FirstOrDefault(t => t.FullName == "Verse.StaticConstructorOnStartup");
+                    Console.WriteLine($"{T} startupAttribute={(attr == null ? "missing" : attr.Assembly.GetName().Name)}");
+                }
+            }
+            catch (Exception e) { Console.WriteLine($"{T} typeProbeFatal {e.GetType().Name}: {e.Message}"); }
+
             ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(defName);
             if (def == null)
             {
