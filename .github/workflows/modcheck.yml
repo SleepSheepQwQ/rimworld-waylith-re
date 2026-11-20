@@ -119,7 +119,7 @@ jobs:
               ok = False
           def read_multi(p):
               txt = open(p, encoding="utf-8", errors="replace").read()
-              m = re.search(r"multi def=\S+ resolved=(\d)/4", txt)
+              m = re.search(r"multi path=\S+ resolved=(\d)/4", txt)
               return int(m.group(1)) if m else None
 
           ma, mb = read_multi("out/a.txt"), read_multi("out/b.txt")
