@@ -1,0 +1,130 @@
+name: modcheck
+
+# Does the shipped GlyphFix actually repair the extension-leak layout inside the engine?
+#
+# Two runs of the same real host, same generated leak mod (ci/make_leak_mod.py), same probe:
+#
+#   A  Core + Odyssey + leak mod                      expect variants=10, masks=5
+#   B  the same, plus the GlyphFix release zip        expect variants=5,  masks=0
+#
+# The probe reads Graphic_Collection.subGraphics out of the object the game built - it does not ask
+# GlyphFix whether it worked. A no-op patch therefore shows up as B == A and fails the gate.
+on:
+  push:
+    paths:
+      - 'modcheck/**'
+      - '.github/workflows/modcheck.yml'
+  workflow_dispatch:
+    inputs:
+      glyphfix_url:
+        description: 'Release zip to test'
+        required: false
+        default: 'https://github.com/SleepSheepQwQ/rimworld-waylith-icon-fix/releases/download/v2.6.3/GlyphFix-2.6.3.zip'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: modcheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  modcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost + probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build modcheck/ModCheck.csproj -c Release -v minimal
+
+      - name: Assemble + generate the leak mod
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          python3 ci/make_leak_mod.py --run "$PWD/run" | tee out/leakmod.txt
+
+      - name: "A) control: leak layout without GlyphFix"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          cp ci/ModsConfig.leak.xml "$CFG/ModsConfig.xml"
+          export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
+          export MODCHECK_DEF=Gun_Revolver_LeakExt
+          export PROBE_TIMEOUT_MS=120000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[MODCHECK\]' "$PWD/../out/a.log" | tee "$PWD/../out/a.txt" || true
+
+      - name: "B) same layout with the shipped GlyphFix"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          URL="${{ github.event.inputs.glyphfix_url || 'https://github.com/SleepSheepQwQ/rimworld-waylith-icon-fix/releases/download/v2.6.3/GlyphFix-2.6.3.zip' }}"
+          mkdir -p out/mod
+          curl -sSL -o out/mod/GlyphFix.zip "$URL"
+          unzip -qo out/mod/GlyphFix.zip -d out/mod/x
+          mkdir -p run/Mods/glyphfix
+          cp -a out/mod/x/. run/Mods/glyphfix/
+          ls -R run/Mods/glyphfix | head -20
+          sed 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' ci/ModsConfig.leak.xml > "$CFG/ModsConfig.xml"
+          cat "$CFG/ModsConfig.xml"
+          export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
+          export MODCHECK_DEF=Gun_Revolver_LeakExt
+          export PROBE_TIMEOUT_MS=120000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[MODCHECK\]' "$PWD/../out/b.log" | tee "$PWD/../out/b.txt" || true
+
+      - name: Gate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, sys
+
+          def read(p):
+              txt = open(p, encoding="utf-8", errors="replace").read()
+              m = re.search(r"variants=(\d+) masks=(\d+)", txt)
+              if not m:
+                  print(f"FAIL: no variants line in {p}")
+                  print(txt[-800:])
+                  return None
+              return int(m.group(1)), int(m.group(2))
+
+          a = read("out/a.txt")
+          b = read("out/b.txt")
+          print("control (no mod):", a)
+          print("with GlyphFix  :", b)
+          ok = True
+          if a != (10, 5):
+              print(f"FAIL: control should be variants=10 masks=5, got {a}")
+              ok = False
+          if b != (5, 0):
+              print(f"FAIL: with GlyphFix should be variants=5 masks=0, got {b}")
+              ok = False
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modcheck-${{ github.run_id }}
+          path: out/*.log
+          if-no-files-found: warn
