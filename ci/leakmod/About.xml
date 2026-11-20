@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>Waylith Leak Repro</name>
+  <author>CI</author>
+  <packageId>waylith.leakrepro</packageId>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+  <description>Minimal mod built by ci/make_leak_mod.py for the extension-leak experiment.
+
+Two texture folders under the same def layout:
+  LeakPlain : UniqueRevolverA..E.png + A..E_m.png      (a normal loose-PNG mod)
+  LeakExt   : UniqueRevolverA..E.png.png + A..E_m.png.png (the asset name keeps the inner .png)
+
+The defs exist only to point Graphic_Random at those folders. No code, no Harmony.</description>
+</ModMetaData>
