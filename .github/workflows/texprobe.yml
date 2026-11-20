@@ -1,0 +1,102 @@
+name: texprobe
+
+# Texture decode + cache probe. Runs the game's own headless host and drives the two branches of
+# Verse.ModContentLoader.LoadTexture (ModDdsLoader for .dds, Texture2D.LoadFromFile for the rest)
+# plus the texture cache both of them write through, against synthetic fixtures whose expected
+# pixels are checked with Pillow before the run (a fixture that Pillow cannot read is a bogus
+# fixture, not an engine bug).
+#
+# No `concurrency:` key on purpose: this job must never share a cancellation group with
+# modcheck.yml / packprobe.yml.
+on:
+  push:
+    paths:
+      - 'ci/texprobe/**'
+      - '.github/workflows/texprobe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          dotnet --version
+          gcc --version | head -1
+
+      - name: Texture tooling (stb headers for libstb.so, Pillow for the fixture control)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+          python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
+      - name: Build the apphost and the probe hook
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build ci/texprobe/TexProbe.csproj -c Release -v minimal
+          ls -l ci/texprobe/bin/Release/net10.0/
+
+      - name: Assemble the game directory
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" | tee out/assemble.log
+
+      - name: Build fixtures (and verify them with Pillow)
+        run: |
+          set -euo pipefail
+          python3 ci/texprobe/fixtures.py "$PWD/out/fixtures" | tee out/fixtures.log
+
+      - name: Run the probe inside the real host
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/ci/texprobe/bin/Release/net10.0/TexProbe.dll"
+          export SCENARIO_OUT="$PWD/out"
+          export TEXPROBE_FIXTURES="$PWD/out/fixtures"
+          RUN_DIR="$PWD/run" BOOT_TIMEOUT=420 bash ci/run.sh "$PWD/out/texprobe.log" -Verbose || true
+          echo '--- [TEXPROBE] ---'
+          grep -a '\[TEXPROBE\]' "$PWD/out/texprobe.log" | head -80 || true
+
+      - name: Gate
+        if: always()
+        run: |
+          set -o pipefail
+          python3 ci/texprobe/gate.py "$PWD/out/texprobe.log" | tee out/gate.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo '### texprobe — decode + cache layer'
+            echo '```'
+            cat out/fixtures.log 2>/dev/null || true
+            grep -a '\[TEXPROBE\]' out/texprobe.log 2>/dev/null | sed 's/^\[TEXPROBE\] //' || true
+            echo '```'
+            echo '```'
+            tail -25 out/gate.log 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: texprobe-log
+          path: |
+            out/texprobe.log
+            out/gate.log
+            out/fixtures.log
