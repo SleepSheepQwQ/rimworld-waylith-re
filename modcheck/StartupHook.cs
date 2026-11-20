@@ -49,6 +49,19 @@ internal static class StartupHook
         string defName = Environment.GetEnvironmentVariable("MODCHECK_DEF") ?? "Gun_Revolver_LeakExt";
         try
         {
+            // The headless harness never runs StaticConstructorOnStartup (the phone does), so do what
+            // RimWorld's StaticConstructorOnStartupUtility does before measuring anything.
+            Type startup = AppDomain.CurrentDomain.GetAssemblies()
+                .Where(a => a.GetName().Name == "GlyphFix")
+                .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                .FirstOrDefault(t => t.FullName == "AgentTouchFix.Bootstrap");
+            if (startup != null)
+            {
+                System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(startup.TypeHandle);
+                Console.WriteLine($"{T} startup ctor invoked (harness emulation)");
+            }
+            else Console.WriteLine($"{T} startup ctor: mod not installed");
+
             Console.WriteLine($"{T} activeMods={ModsConfig.ActiveModsInLoadOrder.Count()}");
             foreach (ModMetaData m in ModsConfig.ActiveModsInLoadOrder)
             {
@@ -123,31 +136,6 @@ internal static class StartupHook
             Console.WriteLine($"{T} def={defName} collection={collection.GetType().Name} variants={(subs == null ? 0 : subs.Length)} masks={masks}");
             Console.WriteLine($"{T} names={string.Join(",", names)}");
 
-            // Was the mod's startup type skipped? Run its static ctor by hand, then build a *new*
-            // graphic for the same folder (different colour -> different cache key -> fresh Init)
-            // and see whether the variant list is repaired from then on.
-            try
-            {
-                Type boot = AppDomain.CurrentDomain.GetAssemblies()
-                    .Where(a => a.GetName().Name == "GlyphFix")
-                    .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
-                    .FirstOrDefault(t => t.FullName == "AgentTouchFix.Bootstrap");
-                if (boot == null) { Console.WriteLine($"{T} manual: bootstrap type not found"); }
-                else
-                {
-                    System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(boot.TypeHandle);
-                    Console.WriteLine($"{T} manual: bootstrap ctor invoked");
-                    string texPath = def.graphicData.texPath;
-                    Graphic fresh = GraphicDatabase.Get<Graphic_Random>(texPath, ShaderDatabase.Cutout,
-                        Vector2.one, new Color(0.99f, 1f, 1f));
-                    FieldInfo f2 = fresh.GetType().GetField("subGraphics", BindingFlags.Public | BindingFlags.Instance);
-                    var subs2 = (Graphic[])f2.GetValue(fresh);
-                    int masks2 = subs2.Count(g => g != null && g.path != null && g.path.EndsWith("_m.png", StringComparison.Ordinal));
-                    Console.WriteLine($"{T} afterManual variants={subs2.Length} masks={masks2}");
-                    Console.WriteLine($"{T} afterManualNames={string.Join(",", subs2.Select(g => g.path.Substring(g.path.LastIndexOf('/') + 1)))}");
-                }
-            }
-            catch (Exception e) { Console.WriteLine($"{T} manualFatal {e.GetType().Name}: {e.Message}"); }
         }
         catch (Exception e)
         {
