@@ -174,6 +174,25 @@ internal static class StartupHook
             }
             Console.WriteLine($"{T} multi path={multiPath} resolved={ok}/4");
         }
+            // DDS format support, measured through the real content path: loose mod files go through
+            // ModDdsLoader, whose ToTextureFormat knows DXT1/DXT5/BC7 only (anything else throws, and
+            // a DX10 header is blindly mapped to BC7 whatever DXGI format it carries).
+            if (Environment.GetEnvironmentVariable("MODCHECK_DDS") == "1")
+            {
+                foreach (string leaf in new[] { "Bc7", "Bc5", "Dxt3" })
+                {
+                    string key = "Things/DdsProbe/" + leaf;
+                    try
+                    {
+                        Texture2D t = ContentFinder<Texture2D>.Get(key, false);
+                        Console.WriteLine($"{T} dds leaf={leaf} hit={(t != null)} name='{(t != null ? t.name : "-")}' size={(t != null ? t.width + "x" + t.height : "-")}");
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"{T} dds leaf={leaf} EXC {e.GetType().Name}: {e.Message}");
+                    }
+                }
+            }
         catch (Exception e)
         {
             Console.WriteLine($"{T} fatal {e.GetType().Name}: {e.Message}");
