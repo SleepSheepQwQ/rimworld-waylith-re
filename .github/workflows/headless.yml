@@ -81,6 +81,11 @@ jobs:
           # 180-frame counter would otherwise race the map generator.
           BOOT_TIMEOUT=420 RUN_DIR="$PWD/run" bash ci/run.sh "$PWD/out/scenario.log" -Verbose
 
+      - name: Verify the decoded PNG against the shipped asset
+        run: |
+          set -euo pipefail
+          python3 ci/verify_icon.py out/icon.json "$PWD" | tee out/verify.txt
+
       - name: Report + gate
         if: always()
         run: |

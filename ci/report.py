@@ -48,6 +48,16 @@ result = re.search(r"\[SCENARIO\] RESULT=(\w+)", scen)
 wall = re.search(r"wall_seconds=([0-9.]+)", boot + scen)
 exit_code = re.search(r"exit_code=(-?\d+)", boot + scen)
 
+# optional: written by ci/verify_icon.py, which decodes the PNG Pillow and compares it with the
+# shipped asset - an independent decoder and an independent comparison from the in-process hook
+verify = {}
+verify_path = SUMMARY.parent / "verify.txt"
+if verify_path.exists():
+    for line in verify_path.read_text(errors="replace").splitlines():
+        if line.startswith("verify.") and "=" in line:
+            k, v = line[len("verify."):].split("=", 1)
+            verify[k] = v
+
 if version is None:
     failures.append("no 'RimWorld <version>' line: the managed host never reached Root.Start")
 if init_ms is None:
@@ -94,6 +104,13 @@ lines.append("| icon | `%s` |" % (icon_line.group(1) if icon_line else "not atte
 lines.append("| pixels | `%s` |" % (pixels_line.group(1) if pixels_line else "not decoded"))
 lines.append("| png | `%s` |" % (png_line.group(1) if png_line else "not written"))
 lines.append("| def-level icon | `%s` |" % (def_icon.group(1) if def_icon else "not probed"))
+if verify:
+    lines.append("| shipped-asset match | `%s` (%s vs `%s`, alpha identical=%s, max delta=%s, mean delta=%s) |" % (
+        verify.get("result", "?"), verify.get("size", "?"), verify.get("source", "?"),
+        verify.get("alphaIdentical", "?"), verify.get("maxChannelDelta", "?"), verify.get("meanAbsDelta", "?")))
+    lines.append("| mask distance | `max channel delta %s` (the icon must not be the mask) |" % verify.get("maskMaxChannelDelta", "?"))
+    if verify.get("result") not in (None, "OK"):
+        failures.append("ci/verify_icon.py: PNG does not match the shipped asset")
 lines.append("| scenario result | `%s` |" % (result.group(1) if result else "MISSING"))
 lines.append("")
 lines.append("| assertion | result | detail |")
