@@ -59,7 +59,15 @@ jobs:
           bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
           python3 ci/make_leak_mod.py --run "$PWD/run" | tee out/leakmod.txt
           python3 ci/make_multimod.py --run "$PWD/run" --source "$PWD/game/Resources/Textures" | tee out/multimod.txt
-          sed -i 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>#' ci/ModsConfig.leak.xml
+          sed -i 's#<li>waylith.leakrepro</li>#<li>waylith.leakrepro</li>\n    <li>waylith.multileak</li>\n    <li>waylith.ddsprobe</li>#' ci/ModsConfig.leak.xml
+
+          # DDS format fixtures, shipped the way a weapon mod ships them: loose .dds with an inner .png
+          mkdir -p run/Mods/DdsProbe/About run/Mods/DdsProbe/Textures/Things/DdsProbe
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<ModMetaData>' '  <name>DdsProbe</name>' '  <author>ci</author>' '  <packageId>waylith.ddsprobe</packageId>' '  <supportedVersions><li>1.7</li></supportedVersions>' '</ModMetaData>' > run/Mods/DdsProbe/About/About.xml
+          cp ddsfix/bc7.dds  run/Mods/DdsProbe/Textures/Things/DdsProbe/Bc7.png.dds
+          cp ddsfix/bc5.dds  run/Mods/DdsProbe/Textures/Things/DdsProbe/Bc5.png.dds
+          cp ddsfix/dxt3.dds run/Mods/DdsProbe/Textures/Things/DdsProbe/Dxt3.png.dds
+          ls -l run/Mods/DdsProbe/Textures/Things/DdsProbe
 
       - name: "A) control: leak layout without GlyphFix"
         run: |
@@ -70,6 +78,7 @@ jobs:
           export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
           export MODCHECK_DEF=Gun_Revolver_LeakExt
           export PROBE_TIMEOUT_MS=120000
+          export MODCHECK_DDS=1
           cd "$PWD/run"
           ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
           grep -aE '^\[MODCHECK\]' "$PWD/../out/a.log" | tee "$PWD/../out/a.txt" || true
@@ -90,6 +99,7 @@ jobs:
           export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
           export MODCHECK_DEF=Gun_Revolver_LeakExt
           export PROBE_TIMEOUT_MS=120000
+          export MODCHECK_DDS=1
           cd "$PWD/run"
           ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
           grep -aE '^\[MODCHECK\]' "$PWD/../out/b.log" | tee "$PWD/../out/b.txt" || true
