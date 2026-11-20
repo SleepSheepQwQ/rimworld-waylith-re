@@ -153,7 +153,7 @@ internal static class StartupHook
         // --- finding: a DX10 header is BC7 no matter what the DXGI word says --------------
         Fact bc5 = Facts["bc5_dx10.dds"];
         Finding("bc5-dx10-read-as-bc7",
-                bc5.Error == null && bc5.Width == 8 && bc5.Vk == "Bc7" && bc5.Alpha0 == 64,
+                bc5.Error == null && bc5.Width == 8 && string.Equals(bc5.Vk, "BC7", StringComparison.OrdinalIgnoreCase) && bc5.Alpha0 == 64,
                 $"fmt={bc5.Vk} bytes={bc5.RawBytes} colour={Hex(bc5.Colours.FirstOrDefault())} alpha0={bc5.Alpha0}/64 " +
                 $"(BC5 decode of the same 64 bytes is opaque: alpha 255; BC7 gives alpha 0 -> invisible)");
 
@@ -358,15 +358,9 @@ internal static class StartupHook
 
     private static string VkLabel(UnityEngine.Texture2D tex)
     {
-        try
-        {
-            object core = typeof(UnityEngine.Texture2D)
-                .GetProperty("CoreTexture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(tex);
-            object cpu = core?.GetType().GetProperty("CpuData")?.GetValue(core);
-            object fmt = cpu?.GetType().GetProperty("Format")?.GetValue(cpu);
-            return fmt?.ToString() ?? "?";
-        }
-        catch { return "?"; }
+        // Texture2D.format is derived from CoreTexture.CpuData.Format, i.e. the loaded format
+        // (DXT1/BC7/RGBA32...). No reflection: the wrapper exposes it directly.
+        try { return tex.format.ToString(); } catch (Exception ex) { return "ERR:" + ex.GetType().Name; }
     }
 
     private static string VkOf(Waylith.Rendering.LoadedTextureFormat fmt)
