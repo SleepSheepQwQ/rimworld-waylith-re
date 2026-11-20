@@ -155,28 +155,24 @@ internal static class StartupHook
 
             // Animal half: Graphic_Multi resolves per-direction keys ("<path>_east"), so a leak makes
             // the main texture miss outright (no mask involved). Count how many rotations resolve.
-            string multiDef = Environment.GetEnvironmentVariable("MODCHECK_MULTI") ?? "IbexLeakAnimal";
-            ThingDef md = DefDatabase<ThingDef>.GetNamedSilentFail(multiDef);
-            if (md != null)
+            // No def needed: Graphic_Multi is built from a path, and the leak mod only ships textures.
+            string multiPath = Environment.GetEnvironmentVariable("MODCHECK_MULTI_PATH")
+                               ?? "Things/Pawn/Animal/IbexLeak/IbexLeak";
+            int ok = 0;
+            Graphic mg = GraphicDatabase.Get<Graphic_Multi>(multiPath, ShaderDatabase.Cutout, Vector2.one, Color.white);
+            foreach (Rot4 r in new[] { Rot4.South, Rot4.North, Rot4.East, Rot4.West })
             {
-                int ok = 0;
-                Graphic mg = GraphicDatabase.Get<Graphic_Multi>(md.graphicData.texPath, ShaderDatabase.Cutout,
-                    Vector2.one, Color.white);
-                foreach (Rot4 r in new[] { Rot4.South, Rot4.North, Rot4.East, Rot4.West })
+                string n = "<null>";
+                try
                 {
-                    string n = "<null>";
-                    try
-                    {
-                        Material m = mg.MatAt(r, null);
-                        Texture tex = m != null ? m.mainTexture : null;
-                        if (tex != null) { n = tex.name; ok++; }
-                    }
-                    catch (Exception e) { n = "!" + e.GetType().Name; }
-                    Console.WriteLine($"{T} multi rot={r} tex={n}");
+                    Material m = mg.MatAt(r, null);
+                    Texture tex = m != null ? m.mainTexture : null;
+                    if (tex != null) { n = tex.name; ok++; }
                 }
-                Console.WriteLine($"{T} multi def={multiDef} resolved={ok}/4");
+                catch (Exception e) { n = "!" + e.GetType().Name; }
+                Console.WriteLine($"{T} multi rot={r} tex={n}");
             }
-            else Console.WriteLine($"{T} multi def={multiDef} missing");
+            Console.WriteLine($"{T} multi path={multiPath} resolved={ok}/4");
         }
         catch (Exception e)
         {
