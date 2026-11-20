@@ -133,8 +133,25 @@ internal static class StartupHook
                 }
             }
 
-            Console.WriteLine($"{T} def={defName} collection={collection.GetType().Name} variants={(subs == null ? 0 : subs.Length)} masks={masks}");
-            Console.WriteLine($"{T} names={string.Join(",", names)}");
+            Console.WriteLine($"{T} def={defName} cachedCollection={collection.GetType().Name} variants={(subs == null ? 0 : subs.Length)} masks={masks}");
+            Console.WriteLine($"{T} cachedNames={string.Join(",", names)}");
+
+            // The def's graphic was built during content load, i.e. before the startup ctor ran. Measure
+            // a fresh one for the same folder: a different colour is a different GraphicRequest, so
+            // GraphicDatabase runs Init again - this time with the patch installed.
+            try
+            {
+                string texPath = def.graphicData.texPath;
+                Graphic fresh = GraphicDatabase.Get<Graphic_Random>(texPath, ShaderDatabase.Cutout,
+                    Vector2.one, new Color(0.99f, 1f, 1f));
+                FieldInfo ff = fresh.GetType().GetField("subGraphics", BindingFlags.Public | BindingFlags.Instance);
+                var fs = (Graphic[])ff.GetValue(fresh);
+                var fn = fs.Select(g => (g == null || string.IsNullOrEmpty(g.path)) ? "<null>" : g.path.Substring(g.path.LastIndexOf('/') + 1)).ToList();
+                int fm = fn.Count(IsMask);
+                Console.WriteLine($"{T} def={defName} fresh variants={fs.Length} masks={fm}");
+                Console.WriteLine($"{T} freshNames={string.Join(",", fn)}");
+            }
+            catch (Exception e) { Console.WriteLine($"{T} freshFatal {e.GetType().Name}: {e.Message}"); }
 
         }
         catch (Exception e)
