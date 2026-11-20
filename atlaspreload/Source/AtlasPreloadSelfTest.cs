@@ -27,7 +27,7 @@ namespace AtlasPreloadFix
             {
                 var good = NewTexture(GoodName);
                 var bad = NewTexture(BadName);
-                forced = TryForceResident(good);
+                forced = TryForceResident(good, log);
 
                 var atlas = NewAtlas();
                 atlas.Insert(good, null);
@@ -156,7 +156,7 @@ namespace AtlasPreloadFix
         /// Give one texture a sentinel GpuTextureAllocation so EnsureResident() returns true through
         /// the shipped first branch. Reflection only: the mod does not compile against Waylith.dll.
         /// </summary>
-        private static bool TryForceResident(Texture2D texture)
+        private static bool TryForceResident(Texture2D texture, Action<string> log)
         {
             try
             {
