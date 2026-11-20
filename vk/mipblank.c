@@ -255,20 +255,19 @@ int main(void)
 
     // the two shapes the engine actually creates for a 256x256 icon
     printf("STEP running cases\n");
-    Readback bc0 = run_case("bc1_mip0_only",    VK_FORMAT_BC1_RGB_UNORM_BLOCK, 0, 0, 2);
+    Readback bc0 = run_case("bc1_mip0_only",   VK_FORMAT_BC1_RGB_UNORM_BLOCK, 0, 0, 2);
     printf("STEP case1 done\n");
-    Readback bcc = run_case("bc1_mip0_cleared", VK_FORMAT_BC1_RGB_UNORM_BLOCK, 0, 1, 2);
-    Readback rg0 = run_case("rgba8_mip0_only",  VK_FORMAT_R8G8B8A8_UNORM,     0, 0, 2);
-    Readback rga = run_case("rgba8_all_mips",   VK_FORMAT_R8G8B8A8_UNORM,     1, 0, 2);
+    Readback bca = run_case("bc1_all_mips",    VK_FORMAT_BC1_RGB_UNORM_BLOCK, 1, 0, 2);
+    Readback rg0 = run_case("rgba8_mip0_only", VK_FORMAT_R8G8B8A8_UNORM,     0, 0, 2);
+    Readback rga = run_case("rgba8_all_mips",  VK_FORMAT_R8G8B8A8_UNORM,     1, 0, 2);
 
     int fails = 0;
     #define CHECK(name, cond) do { if (cond) printf("PASS %s\n", name); else { printf("FAIL %s\n", name); fails++; } } while (0)
     // a level that was never written reads as zero on this ICD -> alpha 0 -> fully transparent
-    CHECK("an unwritten BC1 mip reads as all-zero (blank)", bc0.all_zero);
+    CHECK("an unwritten BC1 mip reads as all-zero (alpha 0 = blank)", bc0.all_zero);
+    CHECK("the same BC1 image with every mip written is not zero", !bca.all_zero);
     CHECK("an unwritten RGBA8 mip also reads as all-zero (the hazard is generic)", rg0.all_zero);
-    CHECK("a written mip is not zero (control)", !rga.all_zero);
-    if (bcc.nonzero > 0) printf("PASS clearing a BC1 image fills every mip (so it is a legal way to define them)\n");
-    else printf("INFO clearing a BC1 image did not land on this ICD - treat the clear point as inconclusive\n");
+    CHECK("the same RGBA8 image with every mip written is not zero", !rga.all_zero);
     printf("RESULT: %s\n", fails ? "FAIL" : "PASS");
     return fails ? 1 : 0;
 }
