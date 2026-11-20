@@ -12,6 +12,7 @@ internal static class Program
         "IsPackedSource", "HasFile", "TryReadFile", "TryGetFileLength", "TryGetEntryName",
         "TryGetCurrentTextureEntry", "TryGetCurrentEntry", "TryReadTexture", "TryRentTexture",
         "LoadFromFile", "LoadFromTextureCache", "FileExists", "MountLoadFolder", "Mount", "Use",
+        "Load", "LoadAll",
     };
 
     private static int Main(string[] args)
@@ -51,9 +52,9 @@ internal static class Program
                             if (!Wanted.Contains(mr.Name)) continue;
                             if (!IsInteresting(decl, mr.Name)) continue;
 
-                            lines.Add($"[CALLSITE] {asmName} :: {type.FullName}::{method.Name} +IL_{ins.Offset:X4} -> {decl}::{mr.Name}, args={mr.Parameters.Count}");
-                            // a small window so the branch / pushed flag is visible
-                            for (int k = Math.Max(0, i - 10); k <= Math.Min(body.Count - 1, i + 6); k++)
+                            lines.Add($"[CALLSITE] {asmName} :: {type.FullName}::{method.Name} +IL_{ins.Offset:X4} -> {decl}::{mr.Name}{GenericArgs(mr)}, args={mr.Parameters.Count}");
+                            int back = (mr.Name == "Load" || mr.Name == "LoadAll") ? 4 : 10;
+                            for (int k = Math.Max(0, i - back); k <= Math.Min(body.Count - 1, i + 4); k++)
                             {
                                 Instruction w = body[k];
                                 string mark = k == i ? " >>" : "   ";
@@ -75,10 +76,19 @@ internal static class Program
     {
         if (name == "LoadFromFile" || name == "LoadFromTextureCache")
             return decl is "UnityEngine.Texture2D" or "Waylith.Rendering.Texture2D";
+        if (name == "Load" || name == "LoadAll")
+            return decl is "UnityEngine.Resources" or "Waylith.Resources";
         if (name == "FileExists")
             return true;
         // pack predicates: only the ones that live in the pack / bridge layer
         return decl == "UnityStubs.ContentPacks" || decl == "Waylith.Assets.ContentPack" || decl == "Waylith.Utils.ResourceFiles";
+    }
+
+    private static string GenericArgs(MethodReference mr)
+    {
+        if (mr is GenericInstanceMethod gim && gim.GenericArguments.Count > 0)
+            return "<" + string.Join(",", gim.GenericArguments.Select(a => { try { return a.FullName; } catch { return a.Name; } })) + ">";
+        return "";
     }
 
     private static string DeclaringName(MethodReference mr)
