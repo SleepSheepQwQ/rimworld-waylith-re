@@ -106,40 +106,59 @@ internal static class StartupHook
         Dump("g16.png", "g16.png", dds: false);
         Dump("gray.png", "gray.png", dds: false);
         Dump("trunc.png", "trunc.png", dds: false);
+        Dump("dds_as.png", "dds_as.png", dds: false);
         Dump("dxt1_ok.dds", "dxt1_ok.dds", dds: true);
         Dump("dxt1_alpha.dds", "dxt1_alpha.dds", dds: true);
         Dump("dxt3.dds", "dxt3.dds", dds: true);
+        Dump("bc4.dds", "bc4.dds", dds: true);
         Dump("bc5_dx10.dds", "bc5_dx10.dds", dds: true);
         Dump("mip4.dds", "mip4.dds", dds: true);
         Dump("short_mips.dds", "short_mips.dds", dds: true);
+        Dump("png_as.dds", "png_as.dds", dds: true);
 
-        // --- the control: the same pixels through the same path must survive ---------------
+        // --- the control: an ordinary 8x8 PNG through the same path survives intact --------
         Fact ok = Facts["ok.png"];
-        bool control = ok.Error == null && ok.Width == 8 && ok.Height == 8 && ok.Distinct == 4;
-        Check("control-png", control, ok.Summary());
+        Check("control-png", ok.Error == null && ok.Width == 8 && ok.Height == 8 && ok.Distinct == 4, ok.Summary());
 
-        // --- M1: an interlaced PNG is refused by BOTH decoders ---------------------------
-        // PngDecoder bails on the interlace byte (Waylith.Graphics.Textures/PngDecoder.cs:53),
-        // TextureLoader is stb, and stb_image has no Adam7 support, so Texture2D.LoadFromFile
-        // catches the throw and replaces the whole icon with a 2x2 magenta placeholder
-        // (Waylith.Rendering/Texture2D.cs:749-763).
+        // --- M1: ModContentLoader routes by NAME, not by magic bytes ----------------------
+        // Assembly-CSharp Verse.ModContentLoader.LoadTexture: `file.Name.EndsWith(".dds")`
+        // picks ModDdsLoader, everything else goes to Texture2D.LoadFromFile, whose decoder
+        // chain (PngDecoder -> stb -> gli) is chosen by extension as well. The same 8x8 BC1
+        // picture therefore survives as .dds and dies as .png, and a perfectly good PNG dies
+        // behind a .dds name.
+        Fact dds = Facts["dxt1_ok.dds"], asPng = Facts["dds_as.png"], asDds = Facts["png_as.dds"];
+        bool m1 = dds.Error == null && dds.Width == 8 && asPng.Placeholder && asDds.Error != null;
+        Mechanism("M1", "extension-routing-destroys-valid-art", m1,
+                  $"same bytes as .dds=8x8/{dds.Distinct}col error=none | as .png={asPng.Short()} " +
+                  $"magenta={asPng.Placeholder} | png bytes as .dds error={(asDds.Error ?? "none")}");
+
+        // --- refuted hypothesis, kept because it is the natural guess: interlace ----------
+        // PngDecoder refuses interlace (PngDecoder.cs:61-64) but TextureLoader is stb, and stb
+        // does implement Adam7, so the fallback decodes it correctly (just on the slow path).
         Fact inter = Facts["inter.png"];
-        bool m1 = inter.Width <= 2 && inter.Height <= 2 && inter.Distinct == 1 && inter.Placeholder;
-        Mechanism("M1", "interlaced-png-to-2x2-magenta", m1,
-                  $"ok.png=8x8x4colours inter.png={inter.Short()} pixel={Hex(inter.Colours.FirstOrDefault())} vk=n/a");
-        Check("interlaced-not-8x8", m1, inter.Summary());
+        Finding("interlaced-png-survives-via-stb", inter.Error == null && inter.Width == 8 && inter.Distinct == 4,
+                $"inter.png={inter.Short()} (managed decoder refuses the interlace byte; stb decodes it)");
 
-        // --- M5 (finding, not blank/wrong-colour): the DDS mip chain is trusted -----------
+        // --- refuted hypothesis: palette / 16-bit / grey PNG ------------------------------
+        foreach (string tag in new[] { "pal.png", "g16.png", "gray.png" })
+            Finding("decoded-" + tag, Facts[tag].Error == null && Facts[tag].Width == 8, Facts[tag].Short());
+
+        // --- finding: the DDS header's mip count is trusted, then silently truncated ------
         Fact mip4 = Facts["mip4.dds"], shortMips = Facts["short_mips.dds"];
-        bool m5 = mip4.RawBytes == 80 && shortMips.RawBytes == 32 && shortMips.Error == null;
-        Finding("mip-truncation", m5,
-                $"mip4.dds raw={mip4.RawBytes}B (expected 80) short_mips.dds raw={shortMips.RawBytes}B " +
-                $"(expected 80, header says MipMapCount=4) error={(shortMips.Error ?? "none")}");
+        Finding("dds-mip-count-silently-truncated",
+                mip4.RawBytes == 56 && shortMips.RawBytes == 32 && shortMips.Error == null,
+                $"mip4.dds raw={mip4.RawBytes}B (32+8+8+8, full chain) short_mips.dds raw={shortMips.RawBytes}B " +
+                $"(header MipMapCount=4, only level 0 present, error={(shortMips.Error ?? "none")})");
 
-        // --- known format gates, re-measured here so the pair below is self-contained ----
+        // --- finding: a DX10 header is BC7 no matter what the DXGI word says --------------
+        Fact bc5 = Facts["bc5_dx10.dds"];
+        Finding("bc5-dx10-read-as-bc7",
+                bc5.Error == null && bc5.Width == 8 && bc5.Vk == "Bc7" && bc5.Alpha0 == 64,
+                $"fmt={bc5.Vk} bytes={bc5.RawBytes} colour={Hex(bc5.Colours.FirstOrDefault())} alpha0={bc5.Alpha0}/64 " +
+                $"(BC5 decode of the same 64 bytes is opaque: alpha 255; BC7 gives alpha 0 -> invisible)");
+
         Console.Error.WriteLine($"{T} decode.dxt3 error={(Facts["dxt3.dds"].Error ?? "none")}");
-        Console.Error.WriteLine($"{T} decode.bc5_dx10 format={Facts["bc5_dx10.dds"].Vk} " +
-                                $"error={(Facts["bc5_dx10.dds"].Error ?? "none")}");
+        Console.Error.WriteLine($"{T} decode.bc4 error={(Facts["bc4.dds"].Error ?? "none")}");
     }
 
     private static void Dump(string tag, string name, bool dds)
@@ -342,7 +361,7 @@ internal static class StartupHook
         try
         {
             object core = typeof(UnityEngine.Texture2D)
-                .GetField("CoreTexture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(tex);
+                .GetProperty("CoreTexture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(tex);
             object cpu = core?.GetType().GetProperty("CpuData")?.GetValue(core);
             object fmt = cpu?.GetType().GetProperty("Format")?.GetValue(cpu);
             return fmt?.ToString() ?? "?";
@@ -396,10 +415,11 @@ internal static class StartupHook
         if (!ok) Failed.Add("mechanism-" + id);
     }
 
+    /// <summary>A secondary observation: printed and gated by nothing, so a refuted guess never
+    /// hides behind a failed job (the mechanism lines are what the job exists for).</summary>
     private static void Finding(string name, bool ok, string detail)
     {
         Console.Error.WriteLine($"{T} FINDING={name} verdict={(ok ? "CONFIRMED" : "REFUTED")} {detail}");
-        if (!ok) Failed.Add("finding-" + name);
     }
 
     private static void Quit()
