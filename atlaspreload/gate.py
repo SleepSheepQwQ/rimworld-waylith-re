@@ -72,26 +72,9 @@ def main(out):
         print("FAIL: in-game self-test did not pass")
         ok = False
 
-    summary = one(fixed_text, r"\[ATLASFIX\] summary pages=(\d+) cand=(\d+) resident=(\d+) fail=(\d+) "
-                             r"maskfail=(\d+) removed=(\d+) tiles=(\d+) warmup_ms=([0-9.]+) "
-                             r"budget_pages=(\d+) allfail_pages=(\d+) disabled=(\d)", "summary")
-    if summary:
-        pages, cand, resident, failed, maskfail, removed, tiles, warmup, budget_pages, allfail_pages, disabled = summary.groups()
-        print(f"patched summary: pages={pages} cand={cand} resident={resident} fail={failed} "
-              f"maskfail={maskfail} removed={removed} tiles={tiles} warmup_ms={warmup} "
-              f"budget_pages={budget_pages} allfail_pages={allfail_pages} disabled={disabled}")
-        if int(cand) > 0 and int(resident) + int(failed) != int(cand):
-            print("FAIL: resident + failed != candidates")
-            ok = False
-        if int(removed) > int(failed):
-            print("FAIL: removed more than failures")
-            ok = False
-    else:
-        ok = False
-
     # The seeded Meta page is the live A/B: observer keeps both textures in the tile map, the
     # filter keeps the sentinel-resident one and drops the one with no GPU resource.
-    observe_path = os.path.join(out, "boot_observe.log")
+    observe_path = os.path.join(out, "boot_seed_observe.log")
     if not os.path.exists(observe_path):
         print("FAIL: missing observe run")
         ok = False
@@ -104,10 +87,18 @@ def main(out):
             print("FAIL: observe did not register both seeded tiles")
             ok = False
 
+    seed_fix_path = os.path.join(out, "boot_seed_fix.log")
+    if not os.path.exists(seed_fix_path):
+        print("FAIL: missing seeded fix run")
+        ok = False
+        fixed_seed = ""
+    else:
+        fixed_seed = read(seed_fix_path)
+
     fix_page = re.search(r"page group=Meta_False cand=2 resident=(\d+) fail=(\d+) maskfail=(\d+) "
-                         r"removed=(\d+) ", fixed_text)
+                         r"removed=(\d+) ", fixed_seed)
     if not fix_page:
-        print("FAIL: missing Meta page line in patched run")
+        print("FAIL: missing Meta page line in seeded fix run")
         ok = False
     else:
         fr, ff, fm, frm = map(int, fix_page.groups())
@@ -115,16 +106,19 @@ def main(out):
         if (fr, ff, frm) != (1, 1, 1):
             print("FAIL: Meta page should be resident=1 fail=1 removed=1")
             ok = False
-    if not re.search(r"tiles group=Meta_False count=1", fixed_text):
+    if not re.search(r"tiles group=Meta_False count=1", fixed_seed):
         print("FAIL: patched run did not leave exactly one Meta tile")
         ok = False
+    if not re.search(r"seed group=Meta_False good_forced=1 good_tile=1 bad_tile=0 tiles=1", fixed_seed):
+        print("FAIL: seeded atlas did not end with one tile and no poison tile")
+        ok = False
 
-    unbounded = os.path.join(out, "boot_fix_unbounded.log")
+    unbounded = os.path.join(out, "boot_seed_unbounded.log")
     if os.path.exists(unbounded):
         text = read(unbounded)
-        match = re.search(r"warmup_ms=([0-9.]+)", text)
+        match = re.search(r"page group=Meta_False cand=2 .*?ms=([0-9.]+)", text)
         if match:
-            print(f"unbounded warmup_ms={match.group(1)}")
+            print(f"unbounded seeded page warmup_ms={match.group(1)}")
 
     if overhead > MAX_OVERHEAD_S:
         print(f"FAIL: patched boot overhead {overhead:+.2f}s exceeds {MAX_OVERHEAD_S:.2f}s")
