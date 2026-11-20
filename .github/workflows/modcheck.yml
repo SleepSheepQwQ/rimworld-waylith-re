@@ -100,7 +100,7 @@ jobs:
 
           def read(p):
               txt = open(p, encoding="utf-8", errors="replace").read()
-              m = re.search(r"variants=(\d+) masks=(\d+)", txt)
+              m = re.search(r"fresh variants=(\d+) masks=(\d+)", txt)
               if not m:
                   print(f"FAIL: no variants line in {p}")
                   print(txt[-800:])
