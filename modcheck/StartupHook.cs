@@ -153,7 +153,6 @@ internal static class StartupHook
             }
             catch (Exception e) { Console.WriteLine($"{T} freshFatal {e.GetType().Name}: {e.Message}"); }
 
-        }
             // Animal half: Graphic_Multi resolves per-direction keys ("<path>_east"), so a leak makes
             // the main texture miss outright (no mask involved). Count how many rotations resolve.
             string multiDef = Environment.GetEnvironmentVariable("MODCHECK_MULTI") ?? "IbexLeakAnimal";
@@ -178,6 +177,7 @@ internal static class StartupHook
                 Console.WriteLine($"{T} multi def={multiDef} resolved={ok}/4");
             }
             else Console.WriteLine($"{T} multi def={multiDef} missing");
+        }
         catch (Exception e)
         {
             Console.WriteLine($"{T} fatal {e.GetType().Name}: {e.Message}");
