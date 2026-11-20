@@ -90,6 +90,7 @@ jobs:
           cp ddsfix/bc5.dds        $M/Textures/Things/DdsProbe/Bc5.dds
           cp ddsfix/dxt3.dds       $M/Textures/Things/DdsProbe/Dxt3.dds
           cp ddsfix/dxt1_alpha.dds $M/Textures/Things/DdsProbe/Dxt1Alpha.dds
+          cp ddsfix/mip1.dds       $M/Textures/Things/DdsProbe/Mip1.dds
           cp ddsfix/png_only.png   $M/Textures/Things/DdsProbe/PngOnly.png
           cp ddsfix/shadow.png     $M/Textures/Things/DdsProbe/Shadow.png
           cp ddsfix/shadow.dds     $M/Textures/Things/DdsProbe/Shadow.dds
@@ -158,7 +159,8 @@ jobs:
                       mm = re.search(key + r"=\(?([-\d.]+)", stats)
                       return float(mm.group(1)) if mm else default
                   rows[leaf] = dict(hit=hit == "True", name=name, size=size, fmt=fmt, stats=stats,
-                                    rgb=(num("meanRGB"),), lum=num("lumSd"), alpha0=num("alpha0"))
+                                    rgb=(num("meanRGB"),), lum=num("lumSd"), alpha0=num("alpha0"),
+                                    mips=num("mips", 1), mip1=num("mip1lum"))
               return text, rows
 
           def variants(text):
@@ -257,6 +259,20 @@ jobs:
                   fail(f"Dxt1Alpha must keep 16 of 64 texels at alpha 0, got {d1b['alpha0']}")
               if d1a is not None:
                   print("control Dxt1Alpha: fmt=%s alpha0=%s" % (d1a["fmt"], d1a["alpha0"]))
+
+          # ---- a one-level file must not be uploaded with empty mip levels: at icon size the sampler
+          #      reads mip>=1, so an all-zero level is "the art disappears when drawn small".
+          m1 = b.get("Mip1")
+          if m1 is None or not m1["hit"] or m1["size"] != "8x8":
+              fail(f"Mip1 (1-level DXT3) should be repaired to 8x8, got {m1 and m1['size']}")
+          else:
+              if m1["mips"] < 2:
+                  fail(f"Mip1 repaired texture has {m1['mips']:.0f} level(s); a 1-level source needs a filled chain")
+              if m1["mip1"] is None or m1["mip1"] <= 1:
+                  fail(f"Mip1 level 1 is empty (mip1lum={m1['mip1']}) - downscaled sampling would show nothing")
+          ma = a.get("Mip1")
+          if ma is not None:
+              print("control Mip1:", "hit=", ma["hit"], "size=", ma["size"], "mips=", ma["mips"])
 
           # ---- a same-named .png must not be the only route: Shadow.dds is DXT3 too
           shb = b.get("Shadow")

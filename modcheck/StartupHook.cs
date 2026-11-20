@@ -187,7 +187,7 @@ internal static class StartupHook
             {
                 foreach (string leaf in new[]
                 {
-                    "Bc7", "Bc5", "Dxt3", "Dxt1Alpha", "PngOnly", "Shadow",
+                    "Bc7", "Bc5", "Dxt3", "Dxt1Alpha", "Mip1", "PngOnly", "Shadow",
                 })
                 {
                     ReportDds("Things/DdsProbe/" + leaf, leaf);
@@ -269,9 +269,31 @@ internal static class StartupHook
                 }
                 catch (Exception e) { stats = "px!" + e.GetType().Name + ":" + e.Message; }
             }
+            // One-level sources are the ones the engine fills with empty mip levels (UploadLevels only
+            // writes what was uploaded, GenerateMipmaps refuses block formats), so the report carries the
+            // level count and what level 1 actually contains: 0 there is the "disappears when drawn
+            // small" defect, whatever mip 0 says.
+            string mips = "-";
+            if (t != null)
+            {
+                int count = 1;
+                try { count = t.mipmapCount; } catch { }
+                if (count > 1)
+                {
+                    try
+                    {
+                        Color32[] px1 = t.GetPixels32(1);
+                        double sum = 0;
+                        foreach (Color32 c in px1) sum += 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+                        mips = $" mips={count} mip1lum={(px1.Length == 0 ? 0 : sum / px1.Length):F1}";
+                    }
+                    catch (Exception e) { mips = $" mips={count} mip1!{e.GetType().Name}"; }
+                }
+                else mips = " mips=1";
+            }
             Console.WriteLine($"{T} dds leaf={leaf} hit={(t != null)} name='{(t != null ? t.name : "-")}'"
                               + $" size={(t != null ? t.width + "x" + t.height : "-")}"
-                              + $" fmt={(t != null ? t.format.ToString() : "-")}' {stats}");
+                              + $" fmt={(t != null ? t.format.ToString() : "-")}' {stats}{mips}");
         }
         catch (Exception e)
         {
