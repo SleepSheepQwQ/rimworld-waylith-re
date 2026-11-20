@@ -67,6 +67,9 @@ jobs:
           cp ddsfix/bc7.dds  run/Mods/DdsProbe/Textures/Things/DdsProbe/Bc7.png.dds
           cp ddsfix/bc5.dds  run/Mods/DdsProbe/Textures/Things/DdsProbe/Bc5.png.dds
           cp ddsfix/dxt3.dds run/Mods/DdsProbe/Textures/Things/DdsProbe/Dxt3.png.dds
+          cp ddsfix/png_only.png run/Mods/DdsProbe/Textures/Things/DdsProbe/PngOnly.png
+          cp ddsfix/shadow.png   run/Mods/DdsProbe/Textures/Things/DdsProbe/Shadow.png
+          cp ddsfix/shadow.dds   run/Mods/DdsProbe/Textures/Things/DdsProbe/Shadow.dds
           ls -l run/Mods/DdsProbe/Textures/Things/DdsProbe
 
       - name: "A) control: leak layout without GlyphFix"
