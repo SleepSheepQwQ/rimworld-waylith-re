@@ -928,7 +928,7 @@ namespace AtlasFix
         {
             try
             {
-                var glfw = Engine.T("Brutal.Glfw.Glfw");
+                var glfw = Engine.T("Brutal.GlfwApi.Glfw") ?? Engine.TSimple("Glfw");
                 var hint = Engine.TSimple("GlfwWindowHint");
                 var winType = Engine.TSimple("GlfwWindow");
                 var gd = Engine.T("Waylith.Graphics.GraphicsDevice");
