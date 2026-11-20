@@ -25,6 +25,15 @@ internal static class StartupHook
     public static void Initialize()
     {
         new Thread(WaitForBoot) { IsBackground = true, Name = "packprobe-waiter" }.Start();
+        new Thread(Watchdog) { IsBackground = true, Name = "packprobe-watchdog" }.Start();
+    }
+
+    private static void Watchdog()
+    {
+        Thread.Sleep(int.TryParse(Environment.GetEnvironmentVariable("PROBE_TIMEOUT_MS"), out int ms) ? ms : 180000);
+        Console.WriteLine($"{T} watchdog: boot never completed, exiting");
+        Console.Out.Flush();
+        Environment.Exit(9);
     }
 
     private static void WaitForBoot()

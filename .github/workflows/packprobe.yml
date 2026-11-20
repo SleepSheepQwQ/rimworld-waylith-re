@@ -65,9 +65,11 @@ jobs:
           ls -l "$PWD/run/Assets.zip" "$PWD/run/Data/Odyssey/Assets.zip"
 
       - name: Probe the packs
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           OUT="$PWD/out"
+          export PROBE_TIMEOUT_MS=180000
           export DOTNET_STARTUP_HOOKS="$PWD/packprobe/bin/Release/net10.0/PackProbe.dll"
           cd "$PWD/run"
           ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces -Verbose > "$OUT/vfs.log" 2>&1 || echo "exit=$?"
