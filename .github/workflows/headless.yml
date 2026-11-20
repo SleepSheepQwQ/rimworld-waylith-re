@@ -86,6 +86,11 @@ jobs:
           set -euo pipefail
           python3 ci/verify_icon.py out/icon.json "$PWD" | tee out/verify.txt
 
+      - name: Verify the color-forced icon against the uncolored one
+        run: |
+          set -euo pipefail
+          python3 ci/verify_color.py out/color.json "$PWD" | tee out/verify_color.txt
+
       - name: Report + gate
         if: always()
         run: |
@@ -116,6 +121,9 @@ jobs:
             out/*.txt
             out/*.png
             out/icon.json
+            out/color.json
+            out/verify.txt
+            out/verify_color.txt
           if-no-files-found: warn
 
       - name: Upload the player log and crash reports

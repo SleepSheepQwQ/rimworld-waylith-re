@@ -58,6 +58,15 @@ if verify_path.exists():
             k, v = line[len("verify."):].split("=", 1)
             verify[k] = v
 
+# optional: written by ci/verify_color.py, the forced-colour (CompUniqueWeapon) experiment
+verify_color = {}
+verify_color_path = SUMMARY.parent / "verify_color.txt"
+if verify_color_path.exists():
+    for line in verify_color_path.read_text(errors="replace").splitlines():
+        if line.startswith("verify.color.") and "=" in line:
+            k, v = line[len("verify.color."):].split("=", 1)
+            verify_color[k] = v
+
 if version is None:
     failures.append("no 'RimWorld <version>' line: the managed host never reached Root.Start")
 if init_ms is None:
@@ -111,6 +120,14 @@ if verify:
     lines.append("| mask distance | `max channel delta %s` (the icon must not be the mask) |" % verify.get("maskMaxChannelDelta", "?"))
     if verify.get("result") not in (None, "OK"):
         failures.append("ci/verify_icon.py: PNG does not match the shipped asset")
+if verify_color:
+    lines.append("| color-forced clone | `%s` (`%s`, variant %s/%s, white==tinted max delta %s, subGraphics=%s, tint=%s) |" % (
+        verify_color.get("result", "?"), verify_color.get("texture", "?"),
+        verify_color.get("variantIndex", "?"), verify_color.get("expectedIndex", "?"),
+        verify_color.get("maxChannelDelta", "?"), verify_color.get("subGraphics", "?"),
+        verify_color.get("materialColor", "?")))
+    if verify_color.get("result") not in (None, "OK"):
+        failures.append("ci/verify_color.py: the forced-colour icon differs from the uncolored one")
 lines.append("| scenario result | `%s` |" % (result.group(1) if result else "MISSING"))
 lines.append("")
 lines.append("| assertion | result | detail |")

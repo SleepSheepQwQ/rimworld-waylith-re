@@ -381,6 +381,15 @@ internal static class StartupHook
             Check("png-written", pngPath != null && pngBytes > 0, $"png={pngPath ?? "<none>"} bytes={pngBytes}");
             Check("spawned-on-map", thing.Spawned && thing.Map == map, $"spawned={thing.Spawned}");
 
+            // ---- the "modified weapon" risk: CompUniqueWeapon.ForceColor -> GraphicColoredFor ----
+            // A unique weapon's DrawColor is not white (CompUniqueWeapon picks a ColorDef), so the
+            // icon path may run through Graphic.GetColoredVersion, i.e. a *clone* of the
+            // Graphic_RandomRotated/Graphic_Random pair. Take the same thing twice: first with the
+            // comp colour removed (plain def graphic), then with a forced non-white colour, and
+            // compare the icon at texture level (name, variant, size, pixels, mask) plus the
+            // clone's subGraphics array (count/paths/textures).
+            ColorExperiment(map);
+
             WriteJson(thing, name, tex, mat, variants, masks, variantIndex, pick, coverage, mr, mg, mb, ma,
                       distinct, bboxW, bboxH, pngPath, pngBytes, sha, stats);
 
@@ -552,6 +561,469 @@ internal static class StartupHook
                $"meanRGB=({mr.ToString("0.##", CultureInfo.InvariantCulture)},{mg.ToString("0.##", CultureInfo.InvariantCulture)},{mb.ToString("0.##", CultureInfo.InvariantCulture)}) " +
                $"meanA={ma.ToString("0.##", CultureInfo.InvariantCulture)} distinctColors={distinct} " +
                $"bbox={(maxX < 0 ? "empty" : bboxW + "x" + bboxH + " at " + minX + "," + minY)}";
+    }
+
+    // ---- 4. colored-clone experiment ----------------------------------------------------------
+    private sealed class IconSnap
+    {
+        public string Tag;
+        public string Tex = "<null>";
+        public int Width;
+        public int Height;
+        public bool Bad = true;
+        public bool Placeholder;
+        public bool Mask;
+        public int VariantIndex = -1;
+        public int ExpectedIndex = -1;
+        public string Material = "<null>";
+        public string MaterialTex = "<null>";
+        public string MaterialMask = "<null>";
+        public Color MaterialColor = Color.white;
+        public double Coverage;
+        public double MeanR;
+        public double MeanG;
+        public double MeanB;
+        public double MeanA;
+        public int Distinct;
+        public int BboxW;
+        public int BboxH;
+        public Color32[] Pixels;
+        public string Png = "<none>";
+        public long PngBytes;
+        public string Sha = "";
+        public string Size => Width + "x" + Height;
+    }
+
+    private sealed class CollInfo
+    {
+        public string Type = "<null>";
+        public string Path = "<null>";
+        public int Count = -1;
+        public string[] SubPaths = Array.Empty<string>();
+        public string[] SubTex = Array.Empty<string>();
+        public string[] SubMask = Array.Empty<string>();
+        public Color[] SubColors = Array.Empty<Color>();
+    }
+
+    /// <summary>
+    /// Takes one thing, removes CompUniqueWeapon's color, snapshots its icon, then forces the same
+    /// thing to a known non-white DrawColor (the value ForceColor feeds GraphicColoredFor) and
+    /// snapshots again. Everything here is on the main thread, inside the same long event.
+    /// </summary>
+    private static void ColorExperiment(Map map)
+    {
+        try
+        {
+            Console.Error.WriteLine($"{T} color.begin def={_target.defName} ignoreThingDrawColor={_target.graphicData?.ignoreThingDrawColor} t={Sec():F1}s");
+            Thing probe = ThingMaker.MakeThing(_target);
+            ThingWithComps twc = probe as ThingWithComps;
+            CompUniqueWeapon cuw = twc == null ? null : twc.TryGetComp<CompUniqueWeapon>();
+            string naturalColorDef = cuw == null || cuw.color == null ? "" : cuw.color.defName;
+            Color naturalDraw = probe.DrawColor;
+            Console.Error.WriteLine($"{T} color.made thingID={probe.thingIDNumber} type={probe.GetType().Name} " +
+                                    $"cuw={(cuw == null ? "<null>" : "present")} naturalColorDef={(naturalColorDef == "" ? "<null>" : naturalColorDef)} " +
+                                    $"naturalDraw={C(naturalDraw)} traits={(cuw == null || cuw.traits == null ? 0 : cuw.traits.Count)}");
+
+            IntVec3 cell;
+            if (!CellFinder.TryFindRandomCellNear(map.Center, map, 30, c => c.Standable(map), out cell)) cell = map.Center;
+            Thing spawned = GenSpawn.Spawn(probe, cell, map, WipeMode.Vanish);
+            Check("color-spawn", spawned != null && probe.Spawned && probe.Map == map,
+                  $"cell={cell} spawned={probe.Spawned} map={(probe.Map == null ? "<null>" : "set")}");
+            if (cuw == null)
+            {
+                Check("color-comp", false, "no CompUniqueWeapon on the made thing");
+                return;
+            }
+
+            ColorDef forcedDef = DefDatabase<ColorDef>.GetNamedSilentFail("UniqueWeapon_Red");
+            if (forcedDef == null)
+            {
+                forcedDef = DefDatabase<ColorDef>.AllDefs
+                    .Where(c => c != null && c.colorType == ColorType.Weapon)
+                    .OrderBy(c => c.defName, StringComparer.Ordinal)
+                    .FirstOrDefault();
+            }
+            if (forcedDef == null)
+            {
+                Check("color-forced-def", false, "no ColorDef with colorType=Weapon");
+                return;
+            }
+            Color forced = forcedDef.color;
+            Console.Error.WriteLine($"{T} color.forced colorDef={forcedDef.defName} color={C(forced)}");
+
+            List<string> variants = VariantNames(_target);
+            List<string> masks = MaskNames(_target);
+
+            // (a) same thing with the comp colour removed: plain def graphic path.
+            cuw.color = null;
+            probe.Notify_ColorChanged();
+            Color whiteDraw = probe.DrawColor;
+            bool white = whiteDraw.IndistinguishableFrom(Color.white);
+            Graphic wg = probe.Graphic;
+            bool whiteClone = !ReferenceEquals(wg, _target.graphic);
+            IconSnap ws = CaptureIcon(probe, variants, masks, "white");
+            CollInfo wci = InspectGraphic(wg);
+            Console.Error.WriteLine($"{T} color.white drawColor={C(whiteDraw)} white={white} clone={whiteClone} " +
+                                    $"graphic={wg.GetType().Name} tex={ws.Tex} size={ws.Size} variantIndex={ws.VariantIndex} " +
+                                    $"expectedIndex={ws.ExpectedIndex} badTex={ws.Bad} mask={ws.Mask} " +
+                                    $"meanRGB=({ws.MeanR:0.##},{ws.MeanG:0.##},{ws.MeanB:0.##}) " +
+                                    $"material={ws.Material} materialTex={ws.MaterialTex} materialColor={C(ws.MaterialColor)}");
+            Console.Error.WriteLine($"{T} color.white.structure graphic={wci.Type} path={wci.Path} subCount={wci.Count} " +
+                                    $"subPaths={string.Join("|", wci.SubPaths)} subTextures={string.Join("|", wci.SubTex)} " +
+                                    $"subMasks={string.Join("|", wci.SubMask)}");
+
+            // (b) same thing, forced non-white DrawColor exactly as CompUniqueWeapon.ForceColor does.
+            cuw.color = forcedDef;
+            probe.Notify_ColorChanged();
+            Color tintedDraw = probe.DrawColor;
+            bool tinted = Close(tintedDraw, forced, 0.01f);
+            Graphic tg = probe.Graphic;
+            bool tintedClone = !ReferenceEquals(tg, _target.graphic);
+            IconSnap ts = CaptureIcon(probe, variants, masks, "tinted");
+            CollInfo tci = InspectGraphic(tg);
+            CollInfo dci = InspectGraphic(_target.graphic);
+            Console.Error.WriteLine($"{T} color.tinted drawColor={C(tintedDraw)} matchesForced={tinted} clone={tintedClone} " +
+                                    $"graphic={tg.GetType().Name} tex={ts.Tex} size={ts.Size} variantIndex={ts.VariantIndex} " +
+                                    $"expectedIndex={ts.ExpectedIndex} badTex={ts.Bad} mask={ts.Mask} " +
+                                    $"meanRGB=({ts.MeanR:0.##},{ts.MeanG:0.##},{ts.MeanB:0.##}) " +
+                                    $"material={ts.Material} materialTex={ts.MaterialTex} materialColor={C(ts.MaterialColor)}");
+            Console.Error.WriteLine($"{T} color.tinted.structure graphic={tci.Type} path={tci.Path} subCount={tci.Count} " +
+                                    $"subPaths={string.Join("|", tci.SubPaths)} subTextures={string.Join("|", tci.SubTex)} " +
+                                    $"subMasks={string.Join("|", tci.SubMask)} subColors={CArray(tci.SubColors)}");
+            Console.Error.WriteLine($"{T} color.def.structure graphic={dci.Type} path={dci.Path} subCount={dci.Count} " +
+                                    $"subPaths={string.Join("|", dci.SubPaths)} subTextures={string.Join("|", dci.SubTex)}");
+
+            bool pixelsSame = PixelsEqual(ws.Pixels, ts.Pixels);
+            bool meanSame = Math.Abs(ws.MeanR - ts.MeanR) < 0.01 && Math.Abs(ws.MeanG - ts.MeanG) < 0.01 &&
+                            Math.Abs(ws.MeanB - ts.MeanB) < 0.01;
+            bool textureSame = ws.Tex == ts.Tex;
+            bool variantSame = ws.VariantIndex == ts.VariantIndex && ts.VariantIndex == ts.ExpectedIndex;
+            bool sizeSame = ws.Width == ts.Width && ws.Height == ts.Height;
+            bool matTexSame = ws.MaterialTex == ts.MaterialTex;
+            bool matNameSame = ws.Material == ts.Material;
+            bool badSame = ws.Bad == ts.Bad && !ts.Bad;
+            bool maskSame = ws.Mask == ts.Mask && !ts.Mask;
+            bool tintApplied = Close(ws.MaterialColor, Color.white, 0.01f) && !Close(ts.MaterialColor, Color.white, 0.01f) &&
+                               Close(ts.MaterialColor, forced, 0.01f);
+            bool subFive = tci.Count == 5 && wci.Count == 5 && dci.Count == 5;
+            bool pathSame = tci.Path == dci.Path && wci.Path == dci.Path;
+            bool subPathsSame = SameStrings(tci.SubPaths, dci.SubPaths) && SameStrings(wci.SubPaths, dci.SubPaths);
+            bool subTexSame = SameStrings(tci.SubTex, dci.SubTex) && SameStrings(wci.SubTex, dci.SubTex);
+            bool subTint = tci.SubColors.Length == 5 && tci.SubColors.All(c => Close(c, forced, 0.01f));
+
+            // MatAt(rot, thing) forwards the thing; MatSingle does not. Widgets.GetIconFor uses
+            // ExtractInnerGraphicFor(thing) before MatAt, so it must land on the thing's variant.
+            Material matAtMat = null;
+            try { matAtMat = tg.MatAt(probe.Rotation, probe); } catch { }
+            string matAtTex = matAtMat == null || matAtMat.mainTexture == null ? "<null>" : matAtMat.mainTexture.name;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < 12; i++)
+            {
+                try
+                {
+                    Material m = tg.MatSingle;
+                    if (m != null && m.mainTexture != null) seen.Add(m.mainTexture.name);
+                }
+                catch { }
+            }
+            Console.Error.WriteLine($"{T} color.matsingle root={tg.GetType().Name} reads=12 distinct={seen.Count} " +
+                                    $"names={string.Join(",", seen.OrderBy(n => n, StringComparer.Ordinal))} " +
+                                    $"matAt(rot,thing)={matAtTex} expected={ts.Tex}");
+            Console.Error.WriteLine($"{T} color.compare textureSame={textureSame} variantSame={variantSame} sizeSame={sizeSame} " +
+                                    $"pixelsSame={pixelsSame} shaSame={ws.Sha == ts.Sha} meanRgbSame={meanSame} " +
+                                    $"badTexSame={badSame} maskSame={maskSame} materialTexSame={matTexSame} " +
+                                    $"materialNameSame={matNameSame} tintApplied={tintApplied} subFive={subFive} " +
+                                    $"pathSame={pathSame} subPathsSame={subPathsSame} subTexturesSame={subTexSame} " +
+                                    $"subTint={subTint}");
+
+            Check("color-comp", true, $"colorDef={forcedDef.defName}");
+            Check("color-white-drawcolor", white, $"drawColor={C(whiteDraw)}");
+            Check("color-white-not-clone", !whiteClone, $"graphic={wg.GetType().Name} clone={whiteClone}");
+            Check("color-tinted-drawcolor", tinted, $"drawColor={C(tintedDraw)} forced={C(forced)}");
+            Check("color-tinted-clone", tintedClone, $"graphic={tg.GetType().Name} clone={tintedClone}");
+            Check("color-subgraphics-five", subFive, $"def={dci.Count} white={wci.Count} tinted={tci.Count}");
+            Check("color-path", pathSame, $"def={dci.Path} white={wci.Path} tinted={tci.Path}");
+            Check("color-subpaths", subPathsSame, $"tinted={string.Join("|", tci.SubPaths)} def={string.Join("|", dci.SubPaths)}");
+            Check("color-subtextures", subTexSame, $"tinted={string.Join("|", tci.SubTex)} def={string.Join("|", dci.SubTex)}");
+            Check("color-subtint", subTint, $"colors={CArray(tci.SubColors)} forced={C(forced)}");
+            Check("color-texture-stable", textureSame, $"white={ws.Tex} tinted={ts.Tex}");
+            Check("color-variant-stable", variantSame, $"white={ws.VariantIndex} tinted={ts.VariantIndex} expected={ts.ExpectedIndex}");
+            Check("color-size-stable", sizeSame, $"white={ws.Size} tinted={ts.Size}");
+            Check("color-pixels-stable", pixelsSame && ws.Sha == ts.Sha, $"whiteSha={ws.Sha} tintedSha={ts.Sha}");
+            Check("color-meanrgb-stable", meanSame, $"white=({ws.MeanR:0.##},{ws.MeanG:0.##},{ws.MeanB:0.##}) tinted=({ts.MeanR:0.##},{ts.MeanG:0.##},{ts.MeanB:0.##})");
+            Check("color-material-tint", tintApplied, $"white={C(ws.MaterialColor)} tinted={C(ts.MaterialColor)} forced={C(forced)}");
+            Check("color-material-tex-stable", matTexSame && matNameSame, $"white={ws.Material}/{ws.MaterialTex} tinted={ts.Material}/{ts.MaterialTex}");
+            Check("color-badtex-stable", badSame, $"white={ws.Bad} tinted={ts.Bad}");
+            Check("color-mask-stable", maskSame && ts.MaterialMask.EndsWith("_m", StringComparison.Ordinal),
+                  $"white={ws.Mask} tinted={ts.Mask} tintedMaskTex={ts.MaterialMask}");
+            Check("color-matsingle-at", matAtTex == ts.Tex, $"matAt={matAtTex} expected={ts.Tex}");
+
+            WriteColorJson(probe, naturalColorDef, naturalDraw, forcedDef, forced, ws, ts, wci, tci, dci, seen,
+                           matAtTex, textureSame, variantSame, sizeSame, pixelsSame, meanSame, matTexSame,
+                           matNameSame, badSame, maskSame, tintApplied, subFive, pathSame, subPathsSame,
+                           subTexSame, subTint);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"{T} color stack:\n{ex}");
+            Check("color-experiment", false, "exception " + ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    private static IconSnap CaptureIcon(Thing thing, List<string> variants, List<string> masks, string tag)
+    {
+        var s = new IconSnap { Tag = tag };
+        float scale, angle;
+        Vector2 proportions;
+        Color color;
+        Material mat;
+        Texture iconTex = Widgets.GetIconFor(thing, new Vector2(128f, 128f), null, stackOfOne: false,
+                                             out scale, out angle, out proportions, out color, out mat);
+        Texture2D tex = iconTex as Texture2D;
+        if (tex == null && iconTex is RenderTexture rt)
+        {
+            var tmp = new Texture2D(rt.width, rt.height, TextureFormat.RGBA32, mipChain: false);
+            RenderTexture prev = RenderTexture.active;
+            RenderTexture.active = rt;
+            tmp.ReadPixels(new Rect(0f, 0f, rt.width, rt.height), 0, 0);
+            tmp.Apply();
+            RenderTexture.active = prev;
+            tex = tmp;
+        }
+        s.Tex = tex == null ? "<null>" : tex.name;
+        s.Width = tex == null ? 0 : tex.width;
+        s.Height = tex == null ? 0 : tex.height;
+        s.Bad = tex == null || tex == BaseContent.BadTex;
+        s.Placeholder = tex != null && tex.width <= 2 && tex.height <= 2;
+        s.Mask = s.Tex.EndsWith("_m", StringComparison.Ordinal) || masks.Contains(s.Tex);
+        s.VariantIndex = variants.IndexOf(s.Tex);
+        s.ExpectedIndex = (thing.OverrideGraphicIndex ?? thing.thingIDNumber) % Math.Max(1, variants.Count);
+        s.Material = mat == null ? "<null>" : mat.name;
+        s.MaterialTex = mat == null || mat.mainTexture == null ? "<null>" : mat.mainTexture.name;
+        try { s.MaterialColor = mat == null ? Color.white : mat.color; } catch { s.MaterialColor = Color.white; }
+        try
+        {
+            Texture mt = mat == null ? null : mat.GetTexture(ShaderPropertyIDs.MaskTex);
+            s.MaterialMask = mt == null ? "<null>" : mt.name;
+        }
+        catch { s.MaterialMask = "<null>"; }
+
+        if (tex != null)
+        {
+            try { s.Pixels = tex.GetPixels32(); } catch { s.Pixels = null; }
+        }
+        if (s.Pixels != null && s.Pixels.Length > 0 && s.Width > 0 && s.Height > 0)
+        {
+            PixelStats(s.Pixels, s.Width, s.Height, out s.Coverage, out s.MeanR, out s.MeanG, out s.MeanB,
+                       out s.MeanA, out s.Distinct, out s.BboxW, out s.BboxH);
+            try
+            {
+                s.Png = Path.Combine(OutDir, $"icon_color_{tag}_{thing.def.defName}_{thing.thingIDNumber}.png");
+                WritePng(s.Png, s.Width, s.Height, s.Pixels);
+                byte[] bytes = File.ReadAllBytes(s.Png);
+                s.PngBytes = bytes.Length;
+                using (var sha256 = SHA256.Create())
+                    s.Sha = Convert.ToHexString(sha256.ComputeHash(bytes)).ToLowerInvariant();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"{T} color.png[{tag}] failed: {ex.GetType().Name}: {ex.Message}");
+                s.Png = "<none>";
+            }
+        }
+        Console.Error.WriteLine($"{T} color.snap[{tag}] tex={s.Tex} size={s.Size} variantIndex={s.VariantIndex} " +
+                                $"expectedIndex={s.ExpectedIndex} badTex={s.Bad} placeholder={s.Placeholder} mask={s.Mask} " +
+                                $"meanRGB=({s.MeanR:0.##},{s.MeanG:0.##},{s.MeanB:0.##}) coverage={s.Coverage.ToString("P2", CultureInfo.InvariantCulture)} " +
+                                $"material={s.Material} materialTex={s.MaterialTex} materialMask={s.MaterialMask} " +
+                                $"materialColor={C(s.MaterialColor)} png={s.Png} sha256={s.Sha}");
+        return s;
+    }
+
+    private static CollInfo InspectGraphic(Graphic g)
+    {
+        var info = new CollInfo();
+        if (g == null) return info;
+        info.Type = g.GetType().Name;
+        Graphic inner = g;
+        if (inner is Graphic_RandomRotated rr) inner = rr.subGraphic;
+        Graphic_Collection coll = inner as Graphic_Collection;
+        if (coll == null) return info;
+        info.Path = coll.path ?? "<null>";
+        info.Count = coll.subGraphics == null ? 0 : coll.subGraphics.Length;
+        info.SubPaths = new string[Math.Max(0, info.Count)];
+        info.SubTex = new string[Math.Max(0, info.Count)];
+        info.SubMask = new string[Math.Max(0, info.Count)];
+        info.SubColors = new Color[Math.Max(0, info.Count)];
+        for (int i = 0; i < info.Count; i++)
+        {
+            Graphic sg = coll.subGraphics[i];
+            info.SubPaths[i] = sg == null ? "<null>" : (sg.path ?? "<null>");
+            Material m = null;
+            try { m = sg == null ? null : sg.MatSingle; } catch { }
+            info.SubTex[i] = m == null || m.mainTexture == null ? "<null>" : m.mainTexture.name;
+            info.SubColors[i] = m == null ? Color.white : m.color;
+            try
+            {
+                Texture mt = m == null ? null : m.GetTexture(ShaderPropertyIDs.MaskTex);
+                info.SubMask[i] = mt == null ? "<null>" : mt.name;
+            }
+            catch { info.SubMask[i] = "<null>"; }
+        }
+        return info;
+    }
+
+    private static bool PixelsEqual(Color32[] a, Color32[] b)
+    {
+        if (a == null || b == null || a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+            if (a[i].r != b[i].r || a[i].g != b[i].g || a[i].b != b[i].b || a[i].a != b[i].a) return false;
+        return true;
+    }
+
+    private static bool SameStrings(string[] a, string[] b)
+    {
+        if (a == null || b == null || a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+            if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+        return true;
+    }
+
+    private static bool Close(Color a, Color b, float eps)
+    {
+        return Math.Abs(a.r - b.r) <= eps && Math.Abs(a.g - b.g) <= eps && Math.Abs(a.b - b.b) <= eps &&
+               Math.Abs(a.a - b.a) <= eps;
+    }
+
+    private static string C(Color c)
+    {
+        return c.r.ToString("0.###", CultureInfo.InvariantCulture) + "," + c.g.ToString("0.###", CultureInfo.InvariantCulture) +
+               "," + c.b.ToString("0.###", CultureInfo.InvariantCulture) + "," + c.a.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private static string CArray(Color[] colors)
+    {
+        if (colors == null) return "[]";
+        return "[" + string.Join(",", colors.Select(c => "[" + C(c) + "]")) + "]";
+    }
+
+    private static string Arr(Color c)
+    {
+        return "[" + c.r.ToString("0.########", CultureInfo.InvariantCulture) + "," +
+               c.g.ToString("0.########", CultureInfo.InvariantCulture) + "," +
+               c.b.ToString("0.########", CultureInfo.InvariantCulture) + "," +
+               c.a.ToString("0.########", CultureInfo.InvariantCulture) + "]";
+    }
+
+    private static string StrArray(string[] values)
+    {
+        if (values == null) return "[]";
+        return "[" + string.Join(",", values.Select(v => "\"" + Esc(v) + "\"")) + "]";
+    }
+
+    private static string B(bool v) => v ? "true" : "false";
+
+    private static void WriteColorJson(Thing probe, string naturalColorDef, Color naturalDraw, ColorDef forcedDef,
+                                       Color forced, IconSnap ws, IconSnap ts, CollInfo wci, CollInfo tci,
+                                       CollInfo dci, HashSet<string> seen, string matAtTex, bool textureSame,
+                                       bool variantSame, bool sizeSame, bool pixelsSame, bool meanSame,
+                                       bool matTexSame, bool matNameSame, bool badSame, bool maskSame,
+                                       bool tintApplied, bool subFive, bool pathSame, bool subPathsSame,
+                                       bool subTexSame, bool subTint)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            sb.Append("{\n");
+            sb.Append("  \"def\": \"").Append(Esc(_target.defName)).Append("\",\n");
+            sb.Append("  \"thingId\": ").Append(probe.thingIDNumber).Append(",\n");
+            sb.Append("  \"naturalColorDef\": \"").Append(Esc(naturalColorDef)).Append("\",\n");
+            sb.Append("  \"naturalDrawColor\": ").Append(Arr(naturalDraw)).Append(",\n");
+            sb.Append("  \"forcedColorDef\": \"").Append(Esc(forcedDef.defName)).Append("\",\n");
+            sb.Append("  \"forcedColor\": ").Append(Arr(forced)).Append(",\n");
+            AppendSnap(sb, "white", ws, false, wci.Type);
+            sb.Append(",\n");
+            AppendSnap(sb, "tinted", ts, true, tci.Type);
+            sb.Append(",\n");
+            sb.Append("  \"compare\": {\n");
+            sb.Append("    \"textureSame\": ").Append(B(textureSame)).Append(",\n");
+            sb.Append("    \"variantSame\": ").Append(B(variantSame)).Append(",\n");
+            sb.Append("    \"sizeSame\": ").Append(B(sizeSame)).Append(",\n");
+            sb.Append("    \"pixelsSame\": ").Append(B(pixelsSame)).Append(",\n");
+            sb.Append("    \"sha256Same\": ").Append(B(ws.Sha == ts.Sha)).Append(",\n");
+            sb.Append("    \"meanRgbSame\": ").Append(B(meanSame)).Append(",\n");
+            sb.Append("    \"badTexSame\": ").Append(B(badSame)).Append(",\n");
+            sb.Append("    \"maskSame\": ").Append(B(maskSame)).Append(",\n");
+            sb.Append("    \"materialSame\": ").Append(B(matNameSame)).Append(",\n");
+            sb.Append("    \"materialTexSame\": ").Append(B(matTexSame)).Append(",\n");
+            sb.Append("    \"tintApplied\": ").Append(B(tintApplied)).Append(",\n");
+            sb.Append("    \"subgraphicsFive\": ").Append(B(subFive)).Append(",\n");
+            sb.Append("    \"pathSame\": ").Append(B(pathSame)).Append(",\n");
+            sb.Append("    \"subPathsSame\": ").Append(B(subPathsSame)).Append(",\n");
+            sb.Append("    \"subTexturesSame\": ").Append(B(subTexSame)).Append(",\n");
+            sb.Append("    \"subColorsTinted\": ").Append(B(subTint)).Append("\n");
+            sb.Append("  },\n");
+            sb.Append("  \"structure\": {\n");
+            sb.Append("    \"defGraphic\": \"").Append(Esc(dci.Type)).Append("\",\n");
+            sb.Append("    \"defPath\": \"").Append(Esc(dci.Path)).Append("\",\n");
+            sb.Append("    \"defSubCount\": ").Append(dci.Count).Append(",\n");
+            sb.Append("    \"whiteSubCount\": ").Append(wci.Count).Append(",\n");
+            sb.Append("    \"tintedSubCount\": ").Append(tci.Count).Append(",\n");
+            sb.Append("    \"tintedPath\": \"").Append(Esc(tci.Path)).Append("\",\n");
+            sb.Append("    \"tintedSubPaths\": ").Append(StrArray(tci.SubPaths)).Append(",\n");
+            sb.Append("    \"tintedSubTextures\": ").Append(StrArray(tci.SubTex)).Append(",\n");
+            sb.Append("    \"tintedSubMasks\": ").Append(StrArray(tci.SubMask)).Append(",\n");
+            sb.Append("    \"tintedSubColors\": ").Append(CArray(tci.SubColors)).Append("\n");
+            sb.Append("  },\n");
+            sb.Append("  \"matSingle\": {\n");
+            sb.Append("    \"root\": \"").Append(Esc(tci.Type)).Append("\",\n");
+            sb.Append("    \"reads\": 12,\n");
+            sb.Append("    \"distinct\": ").Append(seen.Count).Append(",\n");
+            sb.Append("    \"names\": ").Append(StrArray(seen.OrderBy(n => n, StringComparer.Ordinal).ToArray())).Append(",\n");
+            sb.Append("    \"matAtTexture\": \"").Append(Esc(matAtTex)).Append("\",\n");
+            sb.Append("    \"expectedTexture\": \"").Append(Esc(ts.Tex)).Append("\"\n");
+            sb.Append("  },\n");
+            sb.Append("  \"failed\": ").Append(StrArray(Failed.ToArray())).Append("\n");
+            sb.Append("}\n");
+            string path = Path.Combine(OutDir, "color.json");
+            File.WriteAllText(path, sb.ToString());
+            Console.Error.WriteLine($"{T} color.json={path}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"{T} color.json write failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void AppendSnap(StringBuilder sb, string name, IconSnap s, bool clone, string graphicType)
+    {
+        sb.Append("  \"").Append(name).Append("\": {\n");
+        sb.Append("    \"texture\": \"").Append(Esc(s.Tex)).Append("\",\n");
+        sb.Append("    \"size\": \"").Append(Esc(s.Size)).Append("\",\n");
+        sb.Append("    \"width\": ").Append(s.Width).Append(",\n");
+        sb.Append("    \"height\": ").Append(s.Height).Append(",\n");
+        sb.Append("    \"variantIndex\": ").Append(s.VariantIndex).Append(",\n");
+        sb.Append("    \"expectedIndex\": ").Append(s.ExpectedIndex).Append(",\n");
+        sb.Append("    \"badTex\": ").Append(B(s.Bad)).Append(",\n");
+        sb.Append("    \"placeholder\": ").Append(B(s.Placeholder)).Append(",\n");
+        sb.Append("    \"mask\": ").Append(B(s.Mask)).Append(",\n");
+        sb.Append("    \"meanRgb\": [")
+          .Append(s.MeanR.ToString("0.00", CultureInfo.InvariantCulture)).Append(",")
+          .Append(s.MeanG.ToString("0.00", CultureInfo.InvariantCulture)).Append(",")
+          .Append(s.MeanB.ToString("0.00", CultureInfo.InvariantCulture)).Append("],\n");
+        sb.Append("    \"meanAlpha\": ").Append(s.MeanA.ToString("0.00", CultureInfo.InvariantCulture)).Append(",\n");
+        sb.Append("    \"coverage\": ").Append(s.Coverage.ToString("0.000000", CultureInfo.InvariantCulture)).Append(",\n");
+        sb.Append("    \"distinctColors\": ").Append(s.Distinct).Append(",\n");
+        sb.Append("    \"bbox\": [").Append(s.BboxW).Append(",").Append(s.BboxH).Append("],\n");
+        sb.Append("    \"material\": \"").Append(Esc(s.Material)).Append("\",\n");
+        sb.Append("    \"materialTex\": \"").Append(Esc(s.MaterialTex)).Append("\",\n");
+        sb.Append("    \"materialMask\": \"").Append(Esc(s.MaterialMask)).Append("\",\n");
+        sb.Append("    \"materialColor\": ").Append(Arr(s.MaterialColor)).Append(",\n");
+        sb.Append("    \"png\": \"").Append(Esc(s.Png)).Append("\",\n");
+        sb.Append("    \"pngBytes\": ").Append(s.PngBytes).Append(",\n");
+        sb.Append("    \"sha256\": \"").Append(Esc(s.Sha)).Append("\",\n");
+        sb.Append("    \"clone\": ").Append(B(clone)).Append(",\n");
+        sb.Append("    \"graphicType\": \"").Append(Esc(graphicType)).Append("\"\n");
+        sb.Append("  }");
     }
 
     private static void WriteJson(Thing thing, string name, Texture2D tex, Material mat, List<string> variants,
