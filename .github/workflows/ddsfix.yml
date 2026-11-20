@@ -194,6 +194,12 @@ jobs:
           for leaf, row in sorted(a.items()):
               print(f"  {leaf:12s} hit={row['hit']} size={row['size']:9s} fmt={row['fmt']:9s} {row['stats']}")
 
+          # the mod's own view of each repair: which format the loader would have used and which
+          # path was taken (native block upload vs a managed RGBA32 decode)
+          for line in b_text.splitlines():
+              if "ddsfix:" in line:
+                  print("  mod | " + line.split("ddsfix: ", 1)[1][:150])
+
           print("=== B) with GlyphFix ===")
           print("variants:", variants(b_text), " multi:", multi(b_text))
           for leaf, row in sorted(b.items()):
@@ -226,13 +232,20 @@ jobs:
                   fail("Bc5 must not stay BC7-labelled (that is the defect)")
               if bc5b["lum"] is None or bc5b["lum"] <= 2:
                   fail(f"Bc5 pixels look flat (lumSd={bc5b['lum']}), not decoded art")
-              la, lb = lum_of(bc5a["stats"]), lum_of(bc5b["stats"])
-              lu7 = lum_of(b.get("Bc7", {}).get("stats", ""))
-              if lb is not None and lu7:
-                  ratio = max(lb, lu7) / max(1e-6, min(lb, lu7))
-                  print(f"luminance: Bc5={lb:.1f} Bc7={lu7:.1f} ratio={ratio:.2f}")
-                  if ratio > 4.0:
-                      fail(f"Bc5 luminance {lb:.1f} is not the same order as Bc7 {lu7:.1f}")
+              # "same picture" is judged on the brightest channel, not on luminance: a BC4 mask is
+              # sampled and read back as (R,0,0,255) - the port's own dds_to_png.py documents that
+              # GPU-side convention - so a luminance comparison would penalise the correct decode
+              # for the two channels the format does not have.
+              def brightest(stats):
+                  m = re.search(r"meanRGB=\(([-\d.]+),([-\d.]+),([-\d.]+)\)", stats)
+                  return max(float(x) for x in m.groups()) if m else None
+
+              sb, s7 = brightest(bc5b["stats"]), brightest(b.get("Bc7", {}).get("stats", ""))
+              if sb is not None and s7:
+                  ratio = max(sb, s7) / max(1e-6, min(sb, s7))
+                  print(f"brightest channel: Bc5={sb:.1f} Bc7={s7:.1f} ratio={ratio:.2f}")
+                  if ratio > 3.0:
+                      fail(f"Bc5 brightest channel {sb:.1f} is not the same order as Bc7 {s7:.1f}")
 
           # ---- DXT3: BadTex/throw in the control, a real 8x8 texture with GlyphFix
           d3a, d3b = a.get("Dxt3"), b.get("Dxt3")
