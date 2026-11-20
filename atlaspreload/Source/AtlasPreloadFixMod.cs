@@ -60,6 +60,8 @@ namespace AtlasPreloadFix
                 if (all != null)
                 {
                     harmony.Patch(all,
+                        prefix: new HarmonyMethod(typeof(AtlasPreloadFixMod)
+                            .GetMethod(nameof(BakeAllPrefix), BindingFlags.Static | BindingFlags.NonPublic)),
                         postfix: new HarmonyMethod(typeof(AtlasPreloadFixMod)
                             .GetMethod(nameof(BakeAllPostfix), BindingFlags.Static | BindingFlags.NonPublic)));
                 }
@@ -103,9 +105,25 @@ namespace AtlasPreloadFix
                     name = "AtlasPreload_SeedBad",
                 };
                 bool forced = AtlasPreloadSelfTest.TryForceResident(good, Console.Error.WriteLine);
-                bool a = GlobalTextureAtlasManager.TryInsertStatic(TextureAtlasGroup.Meta, good, null);
-                bool b = GlobalTextureAtlasManager.TryInsertStatic(TextureAtlasGroup.Meta, bad, null);
-                Console.Error.WriteLine($"{P}seed group=Meta_False good_insert={a} bad_insert={b} good_forced={forced}");
+
+                // The harness's own PlayDataLoader path aborts before BakeStaticAtlases (missing
+                // shaders/textures), so there is no page to observe in this host. Build the page
+                // the same way GlobalTextureAtlasManager.FlushBatch does and call the patched Bake
+                // directly. This is a test fixture, not the production call site.
+                var atlas = new StaticTextureAtlas(new TextureAtlasGroupKey
+                {
+                    group = TextureAtlasGroup.Meta,
+                    hasMask = false,
+                });
+                atlas.Insert(good, null);
+                atlas.Insert(bad, null);
+                atlas.Bake();
+
+                int goodTile = atlas.TryGetTile(good, out _) ? 1 : 0;
+                int badTile = atlas.TryGetTile(bad, out _) ? 1 : 0;
+                Console.Error.WriteLine(
+                    $"{P}seed group=Meta_False good_forced={forced} good_tile={goodTile} " +
+                    $"bad_tile={badTile} tiles={atlas.tiles.Count} textures={atlas.textures.Count}");
             }
             catch (Exception e)
             {
@@ -214,6 +232,35 @@ namespace AtlasPreloadFix
             {
                 Console.Error.WriteLine($"{P}tiles EXC {e.GetType().Name}: {e.Message}");
             }
+        }
+
+        private static void BakeAllPrefix()
+        {
+            if (!_installed)
+            {
+                return;
+            }
+
+            int groups = 0;
+            int items = 0;
+            try
+            {
+                groups = GlobalTextureAtlasManager.buildQueue?.Count ?? 0;
+                if (GlobalTextureAtlasManager.buildQueue != null)
+                {
+                    foreach (var pair in GlobalTextureAtlasManager.buildQueue)
+                    {
+                        items += pair.Value.Item1?.Count ?? 0;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            Console.Error.WriteLine(
+                $"{P}all begin groups={groups} items={items} " +
+                $"atlases={GlobalTextureAtlasManager.staticTextureAtlases?.Count ?? 0}");
         }
 
         private static void BakeAllPostfix()
