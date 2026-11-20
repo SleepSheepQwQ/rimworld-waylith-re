@@ -173,7 +173,7 @@ internal static class StartupHook
                 Console.WriteLine($"{T} multi rot={r} tex={n}");
             }
             Console.WriteLine($"{T} multi path={multiPath} resolved={ok}/4");
-        }
+
             // DDS format support, measured through the real content path: loose mod files go through
             // ModDdsLoader, whose ToTextureFormat knows DXT1/DXT5/BC7 only (anything else throws, and
             // a DX10 header is blindly mapped to BC7 whatever DXGI format it carries).
@@ -193,6 +193,7 @@ internal static class StartupHook
                     }
                 }
             }
+        }
         catch (Exception e)
         {
             Console.WriteLine($"{T} fatal {e.GetType().Name}: {e.Message}");
