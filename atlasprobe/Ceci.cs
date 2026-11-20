@@ -239,10 +239,10 @@ namespace AtlasProbe
                 foreach (var m in mbr.Methods)
                 {
                     if (!m.HasBody) continue;
-                    bool maxValue = Body(m).Any(i => i.Operand is FieldReference f && f.Name == "MaxValue" && f.DeclaringType.Name == "Single");
+                    bool maxValue = Body(m).Any(i => (i.OpCode == OpCodes.Ldc_R4 && i.Operand is float fv && fv == float.MaxValue)
+                                                  || (i.Operand is FieldReference fr && fr.Name == "MaxValue" && fr.DeclaringType.Name == "Single"));
                     bool creates = Calls(m, null, "CreateSampler");
-                    bool trilinear = Body(m).Any(i => i.Operand is FieldReference f && f.Name == "Trilinear");
-                    if (maxValue && creates) { sampler = m; if (trilinear) break; }
+                    if (maxValue && creates) { sampler = m; break; }
                 }
             C("MeshBatchRenderer plumbs MaxLod=float.MaxValue into the mesh sampler (the sampler may read any mip)", sampler != null,
               sampler == null ? "not found" : sampler.Name);
