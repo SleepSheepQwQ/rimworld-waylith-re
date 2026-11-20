@@ -48,6 +48,16 @@ internal static class StartupHook
         string defName = Environment.GetEnvironmentVariable("MODCHECK_DEF") ?? "Gun_Revolver_LeakExt";
         try
         {
+            Console.WriteLine($"{T} activeMods={ModsConfig.ActiveModsInLoadOrder.Count()}");
+            foreach (ModContentPack m in ModsConfig.ActiveModsInLoadOrder)
+            {
+                Console.WriteLine($"{T} active={m.PackageIdPlayerFacing}|{m.PackageId}|root={m.RootDir}");
+            }
+            var asms = AppDomain.CurrentDomain.GetAssemblies()
+                .Where(a => a.GetName().Name != null && a.GetName().Name.IndexOf("GlyphFix", StringComparison.OrdinalIgnoreCase) >= 0)
+                .Select(a => a.GetName().Name).ToList();
+            Console.WriteLine($"{T} loadedAssemblies={string.Join(",", asms)} count={asms.Count}");
+
             ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(defName);
             if (def == null)
             {
