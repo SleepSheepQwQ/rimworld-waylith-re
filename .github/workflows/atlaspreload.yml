@@ -76,9 +76,9 @@ jobs:
       - name: Install AtlasPreloadFix and boot patched twice + one unbounded probe
         run: |
           set -euo pipefail
-          mkdir -p run/Mods/AtlasPreloadFix/Assemblies
+          mkdir -p run/Mods/AtlasPreloadFix/Assemblies run/Mods/AtlasPreloadFix/About
           cp atlaspreload/bin/Release/AtlasPreloadFix.dll run/Mods/AtlasPreloadFix/Assemblies/
-          cp atlaspreload/About/About.xml run/Mods/AtlasPreloadFix/About.xml
+          cp atlaspreload/About/About.xml run/Mods/AtlasPreloadFix/About/About.xml
           CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
           mkdir -p "$CFG"
           sed -i 's#</activeMods>#  <li>sleepsheep.waylith.atlaspreloadfix</li>\n  </activeMods>#' "$CFG/ModsConfig.xml"
