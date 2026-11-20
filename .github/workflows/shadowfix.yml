@@ -1,0 +1,228 @@
+name: shadowfix
+
+# Does GlyphFix stop an undecodable .dds from deleting a same-named .png - without touching the two
+# things around it (a .dds that *does* decode must keep winning, and a .dds with no png must keep
+# failing), and without moving the three existing gates?
+#
+# One real host, one generated texture pack, two runs:
+#
+#   A  Core + Odyssey + leak mod + ShadowProbe                          (no GlyphFix)   control
+#   B  the same, plus GlyphFix built from source at the ref below                       patched
+#
+# Every number is read out of the engine (ContentFinder / GraphicDatabase / GetPixels32), never out
+# of the mod. "The png won" is asserted as the exact pixel hash of PngOnly, not a plausible mean, and
+# "the .dds still wins" as Kept coming back 8x8 (the dds) rather than 128x128 (its png).
+#
+# The build deliberately does NOT install the pending ddsformat module (its own workflow owns that
+# gate): the point of `Dxt3` staying hit=False is that a broken .dds with no png must still fail, so
+# the loader's own behaviour has to be visible here.
+
+on:
+  push:
+    paths:
+      - 'shadowfix/**'
+      - '.github/workflows/shadowfix.yml'
+  workflow_dispatch:
+    inputs:
+      glyphfix_ref:
+        description: 'rimworld-waylith-icon-fix ref to build'
+        required: false
+        default: 'shadowfix'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shadowfix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shadowfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The mod under test: source, not a release asset, so an unreleased branch can be judged. Its
+      # md5 is printed and uploaded so the tested bytes can be named in the release notes.
+      - uses: actions/checkout@v4
+        with:
+          repository: SleepSheepQwQ/rimworld-waylith-icon-fix
+          ref: ${{ github.event.inputs.glyphfix_ref || 'shadowfix' }}
+          path: glyphfix
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+
+      - name: Build apphost, probe and the mod under test
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build shadowfix/ShadowProbe.csproj -c Release -v minimal
+          dotnet build glyphfix/mod/AgentTouchFix.csproj -c Release -v minimal
+          DLL=glyphfix/mod/bin/Release/net10.0/GlyphFix.dll
+          test -f "$DLL"
+          md5sum "$DLL" | tee out/dll-md5.txt
+          stat -c '%n %s bytes' "$DLL" | tee -a out/dll-md5.txt
+          strings -a "$DLL" | grep -F 'BUILD 2.6.6 shadow' | head -1 | tee out/dll-build.txt
+
+      - name: Unit tests (DDS shadow decision table)
+        run: dotnet test glyphfix/tests/TexSt/TexSt.csproj -c Release -v minimal
+
+      - name: Assemble the host, the leak mod and the texture pack
+        run: |
+          set -euo pipefail
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          python3 ci/make_leak_mod.py --run "$PWD/run" | tee out/leakmod.txt
+          python3 shadowfix/make_fixtures.py --run "$PWD/run" | tee out/fixtures.txt
+
+          # GlyphFix, installed the way a player installs it: About/ + Assemblies/ next to Textures/.
+          mkdir -p run/Mods/glyphfix/About run/Mods/glyphfix/Assemblies
+          cp glyphfix/mod/About/About.xml run/Mods/glyphfix/About/
+          cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll run/Mods/glyphfix/Assemblies/
+          md5sum run/Mods/glyphfix/Assemblies/GlyphFix.dll | tee out/dll-md5-installed.txt
+
+          ls -R run/Mods/ShadowProbe | head -40
+
+      - name: "A) control: texture pack without GlyphFix"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          cp shadowfix/ModsConfig.shadow.xml "$CFG/ModsConfig.xml"
+          export DOTNET_STARTUP_HOOKS="$PWD/shadowfix/bin/Release/net10.0/ShadowProbe.dll"
+          export PROBE_TIMEOUT_MS=180000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[SHADOW\]|^\[AgentTouchFix\]' "$PWD/../out/a.log" | tee "$PWD/../out/a.txt" || true
+
+      - name: "B) same pack with GlyphFix (loaded last)"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          sed 's#<li>waylith.shadowprobe</li>#<li>waylith.shadowprobe</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' \
+              shadowfix/ModsConfig.shadow.xml > "$CFG/ModsConfig.xml"
+          grep -n 'sleepsheep' "$CFG/ModsConfig.xml"
+          export DOTNET_STARTUP_HOOKS="$PWD/shadowfix/bin/Release/net10.0/ShadowProbe.dll"
+          export PROBE_TIMEOUT_MS=180000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[SHADOW\]|^\[AgentTouchFix\]' "$PWD/../out/b.log" | tee "$PWD/../out/b.txt" || true
+
+      - name: Gate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, sys
+
+          def parse(path):
+              text = open(path, encoding="utf-8", errors="replace").read()
+              rows = {}
+              for m in re.finditer(r"\[SHADOW\] tex leaf=(\S+) (.*)", text):
+                  rows[m.group(1)] = dict(re.findall(r"(\w+)=(\S+)", m.group(2)))
+              def num(pattern, default=None):
+                  mm = re.search(pattern, text)
+                  return int(mm.group(1)) if mm else default
+              return text, rows, num
+
+          a_text, a, a_num = parse("out/a.txt")
+          b_text, b, b_num = parse("out/b.txt")
+          problems = []
+
+          def fail(msg):
+              print("FAIL: " + msg)
+              problems.append(msg)
+
+          def show(label, text, rows, num):
+              print(f"=== {label} ===")
+              print("fresh:", num(r"fresh variants=(\d+) masks=\d+"), "/",
+                    num(r"fresh variants=\d+ masks=(\d+)"))
+              print("multi:", num(r"multi path=\S+ resolved=(\d)/4"), "/4")
+              for leaf in sorted(rows):
+                  r = rows[leaf]
+                  print(f"  {leaf:9s} hit={r.get('hit')} size={r.get('size')} fmt={r.get('fmt')}"
+                        f" sd={r.get('sd')} zero={r.get('zero')} px={r.get('px')}")
+
+          show("A) control (no GlyphFix)", a_text, a, a_num)
+          show("B) with GlyphFix", b_text, b, b_num)
+
+          # ---- the three gates that already existed must not move
+          if (a_num(r"fresh variants=(\d+) masks=\d+"), a_num(r"fresh variants=\d+ masks=(\d+)")) != (10, 5):
+              fail("control variants should be 10/5")
+          if (b_num(r"fresh variants=(\d+) masks=\d+"), b_num(r"fresh variants=\d+ masks=(\d+)")) != (5, 0):
+              fail("patched variants should be 5/0")
+          if a_num(r"multi path=\S+ resolved=(\d)/4") != 0:
+              fail("control multi should resolve 0/4")
+          if b_num(r"multi path=\S+ resolved=(\d)/4") != 4:
+              fail("patched multi should resolve 4/4")
+          m = re.search(r"case key=Things/Pawn/Animal/Ibex/IbexMale_east hit=(\w+)", b_text)
+          if not m or m.group(1) != "True":
+              fail("IbexMale_east should hit with GlyphFix (case fallback)")
+
+          # ---- the defect: Shadow.dds (DXT3) deletes Shadow.png, and the png is the only working copy
+          sh_a, sh_b = a.get("Shadow", {}), b.get("Shadow", {})
+          if sh_a.get("hit") != "False":
+              fail(f"control Shadow should be a miss (that is the defect), got {sh_a}")
+          if sh_b.get("hit") != "True":
+              fail(f"Shadow should load with GlyphFix, got {sh_b}")
+          if sh_b.get("size") != "128x128":
+              fail(f"Shadow must come from the 128x128 png, got size={sh_b.get('size')}")
+
+          # ---- ... and it must be the same picture as the png that has no dds next to it
+          pg_b = b.get("PngOnly", {})
+          if pg_b.get("hit") != "True" or pg_b.get("size") != "128x128":
+              fail(f"PngOnly reference missing: {pg_b}")
+          for field in ("px", "sd", "zero", "rgb", "alpha"):
+              if sh_b.get(field) != pg_b.get(field):
+                  fail(f"Shadow {field}={sh_b.get(field)} differs from PngOnly {pg_b.get(field)}")
+
+          # ---- a dds that decodes must keep winning: Kept.dds is DXT1 8x8, Kept.png is 128x128
+          keep_a, keep_b = a.get("Kept", {}), b.get("Kept", {})
+          if keep_a.get("size") != "8x8":
+              fail(f"control Kept should be the 8x8 dds, got {keep_a.get('size')}")
+          if keep_b.get("size") != "8x8":
+              fail(f"Kept must stay the dds (8x8), got {keep_b.get('size')} - the guard overreached")
+          if keep_b.get("hit") != "True":
+              fail("Kept should still load")
+
+          # ---- a broken dds with no png must keep failing: the guard hides no defect
+          if a.get("Dxt3", {}).get("hit") != "False":
+              fail("control Dxt3 should be a miss")
+          if b.get("Dxt3", {}).get("hit") != "False":
+              fail(f"Dxt3 must still be a miss with GlyphFix, got {b.get('Dxt3')}")
+
+          # ---- the log has to show the decision and the module, not just the outcome
+          for needle in ("shadowfix: dds shadow guard armed",
+                         "shadowfix: 'Things/ShadowProbe/Shadow' -> png",
+                         "shadowfix: 'Things/ShadowProbe/Shadow.dds' dropped"):
+              if needle not in b_text:
+                  fail("mod log missing: " + needle)
+          if "'Things/ShadowProbe/Dxt3.dds' dropped" in b_text:
+              fail("the guard dropped a dds that has no image fallback (Dxt3) - it must not")
+          if "BUILD 2.6.6 shadow" not in b_text:
+              fail("the tested DLL did not report BUILD 2.6.6 shadow")
+
+          if problems:
+              print("\n%d check(s) failed" % len(problems))
+              sys.exit(1)
+          print("\nall shadowfix gates passed")
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadowfix-${{ github.run_id }}
+          path: |
+            out/*.log
+            out/*.txt
+            run/Mods/glyphfix/Assemblies/GlyphFix.dll
+          if-no-files-found: warn
