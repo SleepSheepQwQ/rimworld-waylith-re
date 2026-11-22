@@ -93,6 +93,15 @@ namespace UnityEngine
 
     public class Texture2D : Texture
     {
+        public static Texture2D whiteTexture { get { return new Texture2D(1, 1) { name = "whiteTexture" }; } }
+        public static Texture2D blackTexture { get { return new Texture2D(1, 1) { name = "blackTexture" }; } }
+        public static Texture2D redTexture { get { return new Texture2D(1, 1) { name = "redTexture" }; } }
+        public static Texture2D greyTexture { get { return new Texture2D(1, 1) { name = "greyTexture" }; } }
+
+        public FilterMode filterMode { get; set; }
+        public TextureWrapMode wrapMode { get; set; }
+        public int anisoLevel { get; set; }
+
         public Texture2D() { }
         public Texture2D(int w, int h)
         {
@@ -103,6 +112,18 @@ namespace UnityEngine
             GpuResource = new object();
             CpuData = new object();
         }
+        public Texture2D(int w, int h, TextureFormat fmt, bool mipChain) : this(w, h) { }
+        public Texture2D(int w, int h, TextureFormat fmt, bool mipChain, bool linear) : this(w, h) { }
+
+        public void SetPixel(int x, int y, Color c) { }
+        public void SetPixels(Color[] c) { }
+        public void SetPixels32(Color32[] c) { }
+        public Color[] GetPixels() { return new Color[0]; }
+        public Color32[] GetPixels32() { return new Color32[0]; }
+        public Color GetPixel(int x, int y) { return Color.white; }
+        public void Apply() { }
+        public void Apply(bool updateMipmaps) { }
+        public void Apply(bool updateMipmaps, bool makeNoLongerReadable) { }
     }
 
     public class RenderTexture : Texture
@@ -174,6 +195,14 @@ namespace UnityEngine
         public static Color white { get { return new Color(1f, 1f, 1f, 1f); } }
         public static Color black { get { return new Color(0f, 0f, 0f, 1f); } }
         public static Color clear { get { return new Color(0f, 0f, 0f, 0f); } }
+        public static Color grey { get { return new Color(0.5f, 0.5f, 0.5f, 1f); } }
+        public static Color gray { get { return grey; } }
+        public static Color yellow { get { return new Color(1f, 0.92f, 0.016f, 1f); } }
+        public static Color red { get { return new Color(1f, 0f, 0f, 1f); } }
+        public static Color green { get { return new Color(0f, 1f, 0f, 1f); } }
+        public static Color blue { get { return new Color(0f, 0f, 1f, 1f); } }
+        public static Color magenta { get { return new Color(1f, 0f, 1f, 1f); } }
+        public static Color cyan { get { return new Color(0f, 1f, 1f, 1f); } }
 
         public static bool operator ==(Color x, Color y) { return x.r == y.r && x.g == y.g && x.b == y.b && x.a == y.a; }
         public static bool operator !=(Color x, Color y) { return !(x == y); }
