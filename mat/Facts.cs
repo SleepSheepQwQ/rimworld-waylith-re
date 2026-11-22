@@ -138,6 +138,29 @@ namespace MatPool
                  && cdIl.Any(s => s.Contains("set_GpuResource"))
                  && !cdIl.Any(s => s.Contains("CpuData")));
 
+            // The object actually disposed is a Waylith.Rendering.Texture2D, whose override calls
+            // ReleaseCpuData() before base.Dispose(). So the CpuData object survives but its pixel
+            // levels do not: HasData becomes false. This is what keeps G's leak to metadata only.
+            var tex2dDispose = One(w, "Waylith.Rendering.Texture2D", "Dispose");
+            var releaseCpu = One(w, "Waylith.Rendering.Texture2D", "ReleaseCpuData");
+            var pixelRelease = One(w, "Waylith.Graphics.Textures.TexturePixelData", "Release");
+            if (tex2dDispose.IsNil || releaseCpu.IsNil || pixelRelease.IsNil)
+                Broken.Add("Waylith.Rendering.Texture2D.Dispose / ReleaseCpuData / TexturePixelData.Release missing");
+            else
+            {
+                var t2 = Steps(w, tex2dDispose);
+                var rc = Steps(w, releaseCpu);
+                var pr = Steps(w, pixelRelease);
+                Fact("Texture2D.Dispose releases the CPU levels through ReleaseCpuData before base.Dispose",
+                     t2.Any(s => s.Contains("ReleaseCpuData"))
+                     && t2.Any(s => s.Contains("Waylith.Rendering.Texture::Dispose")));
+                Fact("ReleaseCpuData reaches TexturePixelData.Release, which empties Levels but leaves CpuData non-null",
+                     rc.Any(s => s.Contains("get_CpuData"))
+                     && rc.Any(s => s.Contains("TexturePixelData::Release"))
+                     && pr.Any(s => s.Contains("set_Levels"))
+                     && pr.Any(s => s.Contains("Array::Empty")));
+            }
+
             // ---------------------------------------------------------------- ST routes
             var setVec = One(u, "UnityEngine.Material", "SetVector", "SetVector(Int32");
             var setScale = One(u, "UnityEngine.Material", "SetTextureScale", "SetTextureScale(Int32");

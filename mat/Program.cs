@@ -404,21 +404,24 @@ namespace MatPool
             Texture2D before = (Texture2D)m1.mainTexture;
             object gpuBefore = before.GpuResource;
             object cpuBefore = before.CpuData;
+            bool cpuDataBefore = before.CpuDataHasData;
             int poolBefore = PoolSize();
 
             Say("[SCENARIO] G the request's mainTex is destroyed, then MatFrom is called again");
             Check("G: before destroy the material has a GPU resource and CPU data",
-                  gpuBefore != null && cpuBefore != null);
+                  gpuBefore != null && cpuBefore != null && cpuDataBefore);
 
             UnityEngine.Object.Destroy(tex);
             Say("[INFO] G after Destroy: tex==null is " + (tex == null)
                 + ", ReferenceEquals(tex,null) is " + ReferenceEquals(tex, null)
                 + ", GpuResource=" + (tex.GpuResource == null ? "null" : "live")
-                + ", CpuData=" + (tex.CpuData == null ? "null" : "live"));
+                + ", CpuData=" + (tex.CpuData == null ? "null" : "live")
+                + ", CpuData.HasData=" + tex.CpuDataHasData);
             Check("G: the texture is destroyed and fake-null", tex.IsDestroyed && tex == null);
             Check("G: the managed reference is still alive", !ReferenceEquals(tex, null));
             Check("G: GpuResource is released and nulled", tex.GpuResource == null);
-            Check("G: CpuData is retained (Dispose does not clear it)", tex.CpuData != null);
+            Check("G: the CpuData object remains but its levels are released (HasData=false)",
+                  tex.CpuData != null && !tex.CpuDataHasData);
 
             Material m2 = MaterialPool.MatFrom(Req(tex, Color.white));
             Say("[INFO] G MatFrom -> " + (m2 == null ? "null" : m2.name)
@@ -459,7 +462,7 @@ namespace MatPool
                   ReferenceEquals(dead, again) && again == null);
             Check("G3: the dead material stays in the pool", PoolSize() == 1, "pool=" + PoolSize());
 
-            Say("[IMPACT] G: after Destroy, pool=1 stale entry, mainTexture=fake-null, GpuResource=null, CpuData=live.");
+            Say("[IMPACT] G: after Destroy, pool=1 stale entry, mainTexture=fake-null, GpuResource=null, CpuData.HasData=false.");
             Say("[IMPACT] G: a normal request gets BadMat; a needsMainTex=false request and a destroyed Material both get the stale object.");
             Row("G", "tex (destroyed)", "same request", "1", "BadMat (normal) / stale (bypass)", "stale entry never evicted");
         }

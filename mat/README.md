@@ -53,19 +53,20 @@ shader without it, so a stub that quietly lost mask support would make C collaps
 
 ## The dll's own account of the key, asserted (not assumed)
 
-Nineteen `[FACT]` lines are read from `dlls/Assembly-CSharp.dll`, `UnityStubs.dll` and
+Twenty-one `[FACT]` lines are read from `dlls/Assembly-CSharp.dll`, `UnityStubs.dll` and
 `Waylith.dll` with `System.Reflection.Metadata` and IL decoding (`Assembly.cs`, `MiniIl.cs`).
 The first twelve cover the pool key:
 the two dictionary field types, the
 `TryGetValue → MaterialAllocator.Create → Add → Add(reverse)` order, the mask nulling and the
 `Color32` quantisation happening *before* the lookup, the eight fields `Equals` compares in order,
 `shaderParameters` being compared by a bare `ceq`, `GetHashCode` hashing exactly the same eight
-fields, and `needsMainTex` appearing in neither. The other seven pin the cases F/G model:
+fields, and `needsMainTex` appearing in neither. The other nine pin the cases F/G model:
 `Object.Destroy` disposes then sets `_destroyed`; `Texture.Dispose(bool)` disposes the core
 texture and sets `_disposed`; `Texture.op_Equality` reads `_disposed`, never `_destroyed`;
 `Object.op_Equality` reads `_destroyed`; `Waylith.Rendering.Texture.Dispose` releases
-`GpuResource` and leaves `CpuData`; and `SetTextureScale` / `SetVector("_MainTex_ST")` both
-reach the engine's one `textureTransforms` slot. Any drift prints `[BROKEN]` and exits 2.
+`GpuResource`; the `Texture2D` override then releases the CPU levels (`CpuData` stays non-null,
+`HasData=false`); and `SetTextureScale` / `SetVector("_MainTex_ST")` both reach the engine's
+one `textureTransforms` slot. Any drift prints `[BROKEN]` and exits 2.
 
 ## The request shapes A–G
 
@@ -109,16 +110,17 @@ mis-rendering paths are F and G, and neither is a tint rounding artefact:
   slot, so the last writer wins. Measured: A sets scale (2,3)/offset (0.25,0.5), B asks for the
   same material and writes identity, A reads (1,1)/(0,0); B then sets scale (4,5), A reads
   (0,0,4,5). Pool size stays 1. A clone has its own ST and leaves the pooled material at (4,5).
-* **G — a destroyed mainTex.** Destroy releases `GpuResource`, keeps `CpuData` and leaves the
-  managed `Texture2D` reference in place. A normal request then hits `req.mainTex == null`
+* **G — a destroyed mainTex.** Destroy releases `GpuResource`, drops the CPU pixel levels
+  (`Texture2D.Dispose` -> `ReleaseCpuData`; `CpuData` is non-null but `HasData=false`) and leaves
+  the managed `Texture2D` reference in place. A normal request then hits `req.mainTex == null`
   (Texture.op_Equality sees `_disposed`) and returns `BaseContent.BadMat`; the old material is
   **not** served and stays in the pool with a fake-null mainTexture. A `needsMainTex=false`
   request carrying the same destroyed reference skips that guard and does return the stale
   material. A destroyed `Material` is not guarded at all: `MatFrom` returns the dead instance.
   Each stale entry pins the request, the `Material`, the `Texture2D` wrapper and its
-  `CoreTexture`, so the retained `CpuData` cannot be collected either. At 128x128 RGBA that is
-  64 KiB (about 85 KiB with a mip chain) per destroyed icon texture, times every texture a mod
-  reload or atlas rebuild leaves behind; the pool has no eviction path.
+  `CoreTexture`/empty `CpuData` shell. The pixel bytes are released, so the leak is object count
+  (one entry per destroyed texture per key), not megabytes per icon; it is still unbounded
+  because the pool has no eviction path.
 
 ## Call-site scan (shipped Assembly-CSharp, IL)
 

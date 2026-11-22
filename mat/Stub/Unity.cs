@@ -63,6 +63,7 @@ namespace UnityEngine
         // only null / non-null is asserted.
         public object GpuResource { get; set; }
         public object CpuData { get; set; }
+        public bool CpuDataHasData { get; set; }
 
         private bool _disposed;
 
@@ -71,6 +72,9 @@ namespace UnityEngine
         public void Dispose()
         {
             GpuResource = null;
+            // Waylith.Rendering.Texture2D.Dispose overrides the base: ReleaseCpuData() drops the
+            // pixel levels, but the CpuData object itself is not nulled.
+            CpuDataHasData = false;
             _disposed = true;
         }
 
@@ -111,6 +115,7 @@ namespace UnityEngine
             // only the former (Waylith.Rendering.Texture.Dispose), which is the state G asserts.
             GpuResource = new object();
             CpuData = new object();
+            CpuDataHasData = true;
         }
         public Texture2D(int w, int h, TextureFormat fmt, bool mipChain) : this(w, h) { }
         public Texture2D(int w, int h, TextureFormat fmt, bool mipChain, bool linear) : this(w, h) { }
