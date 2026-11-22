@@ -1,0 +1,119 @@
+name: uicon-chain
+
+# Prints the whole animal UI-icon chain for four real core defs (Ibex, Squirrel, Rat, Boomrat) and
+# locates the step where it becomes empty. Each step is read from the running host, not from XML:
+#
+#   graphicData -> pawnKind.lifeStages.Last().bodyGraphicData -> Graphic_Multi
+#     -> ExtractInnerGraphicFor(null) -> MatAt(rot) -> shader / mainTexture / mask
+#     -> ResolveIcon decision (TryGetUIShader + MaterialPool.TryGetRequestForMat)
+#     -> def.uiIcon / def.uiIconMaterial
+#     -> Widgets.ThingIcon(Rect, ThingDef) early return, then Widgets.GetIconFor(ThingDef)
+#     -> the instance path the wildlife table really draws
+#        (PawnColumnWorker_Label -> Widgets.ThingIcon(Rect, Thing) -> BodyGraphic.MatAt(East))
+#
+# Three boots from one assembled directory:
+#   A  harness content as shipped (21 textures, no animal art)  -> the empty-content branch
+#   B  the same plus 4-direction PNGs at the exact real texPaths -> the resolved chain
+#   C  B again, with Widgets.ThingIcon actually called (Harmony reports whether ThingIconWorker
+#      was reached, i.e. whether the early return really fired)
+on:
+  push:
+    paths:
+      - 'uicon/**'
+      - '.github/workflows/uicon-chain.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uicon-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost + probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build uicon/UiCon.csproj -c Release -v minimal
+          ls -l uicon/bin/Release/net10.0/UiCon.dll
+
+      - name: Assemble
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          tail -5 out/assemble.log
+          find run/RimWorld_Data/Resources/Textures -type f | sort
+
+      - name: "A) harness content as shipped, no animal art"
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/uicon/bin/Release/net10.0/UiCon.dll"
+          export PROBE_TIMEOUT_MS=120000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[UICON\]' "$PWD/../out/a.log" | tee "$PWD/../out/a.txt" || true
+
+      - name: "B) with 4-direction animal PNGs at the exact texPaths"
+        run: |
+          set -euo pipefail
+          python3 uicon/make_animal_art.py --resources run/RimWorld_Data/Resources
+          export DOTNET_STARTUP_HOOKS="$PWD/uicon/bin/Release/net10.0/UiCon.dll"
+          export PROBE_TIMEOUT_MS=120000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[UICON\]' "$PWD/../out/b.log" | tee "$PWD/../out/b.txt" || true
+
+      - name: "C) same content, call Widgets.ThingIcon and watch for ThingIconWorker"
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/uicon/bin/Release/net10.0/UiCon.dll"
+          export PROBE_TIMEOUT_MS=120000
+          export UICON_CALL=1
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/c.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[UICON\]' "$PWD/../out/c.log" | tee "$PWD/../out/c.txt" || true
+
+      - name: Report
+        run: |
+          set -euo pipefail
+          python3 uicon/report.py out/a.txt out/b.txt out/c.txt | tee out/summary.txt
+          {
+            echo '```'
+            cat out/summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uicon-chain-${{ github.run_id }}
+          path: |
+            out/a.log
+            out/b.log
+            out/c.log
+            out/a.txt
+            out/b.txt
+            out/c.txt
+            out/summary.txt
+            out/assemble.log
+          if-no-files-found: warn
