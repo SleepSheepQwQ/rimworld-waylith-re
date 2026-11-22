@@ -23,6 +23,22 @@
       <HintPath>../dlls/Assembly-CSharp.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <!-- Verse.Log's static initialiser builds a LogCategory; only the type has to exist, its
+         logging is disabled without a LogSystem factory. Pulling the logging closure in is cheaper
+         than re-implementing Verse.Log on the one path (MatFrom with a null source texture) that
+         needs to log before returning BadMat. -->
+    <Reference Include="Brutal.Core.Logging">
+      <HintPath>../dlls/Brutal.Core.Logging.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Brutal.Core.Common">
+      <HintPath>../dlls/Brutal.Core.Common.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions">
+      <HintPath>../dlls/Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

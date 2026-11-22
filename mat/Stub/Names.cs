@@ -42,6 +42,10 @@ namespace UnityEngine
 
     public static class Application
     {
+        public delegate void LogCallback(string condition, string stackTrace, LogType type);
+
+        public static event LogCallback logMessageReceivedThreaded;
+
         public static string dataPath { get { return ""; } }
         public static string persistentDataPath { get { return ""; } }
         public static string streamingAssetsPath { get { return ""; } }
@@ -49,6 +53,8 @@ namespace UnityEngine
         public static bool isPlaying { get { return false; } }
         public static RuntimePlatform platform { get { return RuntimePlatform.LinuxPlayer; } }
     }
+
+    public enum LogType { Error = 0, Assert = 1, Warning = 2, Log = 3, Exception = 4 }
 
     public static class Time
     {

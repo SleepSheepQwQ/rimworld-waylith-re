@@ -390,9 +390,11 @@ namespace UnityEngine
             if (n.EndsWith("_ST", StringComparison.Ordinal))
             {
                 // TextureST.Reorder + TrySetTextureST: property (offset.x, offset.y, scale.x, scale.y)
-                // is stored as offset=(x,y), scale=(z,w).
-                _offsets[id] = new Vector2(v.x, v.y);
-                _scales[id] = new Vector2(v.z, v.w);
+                // is stored on the texture property (id without the _ST suffix), as offset=(x,y),
+                // scale=(z,w).
+                int texId = Shader.PropertyToID(n.Substring(0, n.Length - 3));
+                _offsets[texId] = new Vector2(v.x, v.y);
+                _scales[texId] = new Vector2(v.z, v.w);
             }
             else
             {
@@ -408,8 +410,9 @@ namespace UnityEngine
             int id = Shader.PropertyToID(n);
             if (n.EndsWith("_ST", StringComparison.Ordinal))
             {
-                Vector2 o = GetTextureOffset(id);
-                Vector2 s = GetTextureScale(id);
+                int texId = Shader.PropertyToID(n.Substring(0, n.Length - 3));
+                Vector2 o = GetTextureOffset(texId);
+                Vector2 s = GetTextureScale(texId);
                 return new Vector4(o.x, o.y, s.x, s.y);
             }
             Vector4 v;
