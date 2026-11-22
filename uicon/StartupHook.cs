@@ -60,7 +60,7 @@ internal static class StartupHook
         Console.WriteLine($"{T} patch: ThingIconWorker hooked params={worker.GetParameters().Length}");
     }
 
-    private static void WorkerPrefix() { workerHit = true; }
+    public static void WorkerPrefix() { workerHit = true; }
 
     private static void Watchdog()
     {
@@ -137,16 +137,20 @@ internal static class StartupHook
         RaceProperties race = def.race;
         PawnKindDef kind = race?.AnyPawnKind;
         LifeStageDef stage = null;
+        PawnKindLifeStage kindStage = null;
         GraphicData bgd = null;
         if (race == null) Console.WriteLine($"{T} def={dn} step=race <null>");
         else if (kind == null) Console.WriteLine($"{T} def={dn} step=race pawnKind=<null>");
         else if (kind.lifeStages == null || kind.lifeStages.Count == 0) Console.WriteLine($"{T} def={dn} step=bodySource lifeStages=0");
         else
         {
-            stage = kind.lifeStages[kind.lifeStages.Count - 1];
-            bgd = stage.bodyGraphicData;
+            kindStage = kind.lifeStages[kind.lifeStages.Count - 1];
+            bgd = kindStage.bodyGraphicData;
+            stage = race.lifeStageAges != null && race.lifeStageAges.Count > 0
+                ? race.lifeStageAges[race.lifeStageAges.Count - 1].def
+                : null;
             Console.WriteLine($"{T} def={dn} step=bodySource pawnKind={kind.defName} lifeStages={kind.lifeStages.Count}"
-                              + $" lastStage={stage.defName} texPath='{(bgd == null ? "<null>" : bgd.texPath)}'"
+                              + $" lastStage={(stage == null ? "?" : stage.defName)} texPath='{(bgd == null ? "<null>" : bgd.texPath)}'"
                               + $" graphicClass={(bgd == null ? "<null>" : Typ(bgd.graphicClass))}"
                               + $" shaderType={(bgd?.shaderType == null ? "<null>" : bgd.shaderType.defName)}"
                               + $" maskPath={(bgd == null || bgd.maskPath.NullOrEmpty() ? "<null>" : bgd.maskPath)}"
