@@ -347,7 +347,6 @@ internal static class StartupHook
                                       out scale, out angle, out proportions, out color, out material);
         }
         catch (Exception e) { iconErr = $"{e.GetType().Name}: {OneLine(e.Message)}"; }
-
         Texture2D tex2d = icon as Texture2D;
         bool isBad = icon != null && ReferenceEquals(icon, BaseContent.BadTex);
         string matName = material == null ? "<null>" : material.name;
@@ -365,7 +364,7 @@ internal static class StartupHook
         _workerCalls = 0; _workerTex = "-"; _workerMat = "-";
         string drawErr = "-";
         try { Widgets.ThingIcon(new Rect(0f, 0f, 32f, 32f), pawn); }
-        catch (Exception e) { drawErr = $"{e.GetType().Name}: {OneLine(e.Message)}"; }
+        catch (Exception e) { drawErr = $"{e.GetType().Name}: {OneLine(e.Message)} @ {Top(e)}"; }
         Line($"species={name} step=draw workerCalls={_workerCalls} workerTex='{_workerTex}' " +
              $"workerMat='{_workerMat}' error='{drawErr}'");
     }
@@ -394,6 +393,17 @@ internal static class StartupHook
         if (s == null) return "";
         s = s.Replace("\r", " ").Replace("\n", " ");
         return s.Length > 300 ? s.Substring(0, 300) : s;
+    }
+
+    /// <summary>Top three frames of a caught exception, so "it threw" names where.</summary>
+    private static string Top(Exception e)
+    {
+        string st = e.StackTrace;
+        if (string.IsNullOrEmpty(st)) return "<no-stack>";
+        var frames = st.Replace("\r", "").Split('\n')
+                       .Select(l => l.Trim()).Where(l => l.Length > 0).Take(3).ToList();
+        string joined = string.Join(" <- ", frames);
+        return joined.Length > 300 ? joined.Substring(0, 300) : joined;
     }
 
     private static string F(float v) { return v.ToString("0.###", CultureInfo.InvariantCulture); }
