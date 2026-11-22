@@ -157,13 +157,18 @@ jobs:
               if not line or ("calls=%s:1" % kind) not in line:
                   fail("%s: direct material/texcoord tail did not reach the backend (%s)" % (name, line))
 
-          # Positive control: with active non-null the material path must not reach the backend.
+          # Positive control: with active non-null the material path must not reach the backend,
+          # while the plain texture path is unaffected (it never reads RenderTexture.active).
           for name in ("Ibex", "Boomalope"):
               line = find(r"^\[ACTIVE\] %s: direct\.material\.forced .*$" % name)
               if not line:
                   fail("%s: no forced-active control line" % name)
               elif "calls=none" not in line:
                   fail("%s: forced-active draw still reached the backend: %s" % (name, line))
+          for name in ("Squirrel", "Cow"):
+              line = find(r"^\[ACTIVE\] %s: direct\.material\.forced .*$" % name)
+              if not line or "calls=texcoords:1" not in line:
+                  fail("%s: forced-active plain-texture draw did not reach the backend (%s)" % (name, line))
 
           # Live pawn path (Thing overload) on the real map.
           for name, kind in (("Ibex", "material"), ("Squirrel", "texcoords")):
@@ -179,8 +184,8 @@ jobs:
                       if l.startswith("[ACTIVE] transition ") and "null <-" not in l
                       and "ActiveProbe_Forced" not in l]
           print("transitions forced=%d other-non-null=%d" % (len(forced), len(non_null)))
-          if len(forced) != 1:
-              fail("expected exactly one transition to the forced RT, saw %d" % len(forced))
+          if len(forced) != 4:
+              fail("expected one forced-RT transition per def (4), saw %d" % len(forced))
           if non_null:
               fail("unexpected non-null active transitions: %s" % non_null[:3])
 

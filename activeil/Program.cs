@@ -12,12 +12,12 @@ internal static class Program
     private static readonly string Dir =
         Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), "dlls")) ? "dlls" : "../dlls";
 
-    private static readonly string[] Asms =
-    {
-        "UnityStubs.dll", "Assembly-CSharp.dll", "Waylith.dll", "PortUI.dll", "RwHost.dll",
-        "RimWorld.dll", "Waylith.UnityCompat.dll", "Waylith.AssetBake.dll", "Waylith.VideoDecode.dll",
-        "ModCompatibility.dll"
-    };
+    private static readonly string[] Asms = Directory.GetFiles(
+            Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), "dlls")) ? "dlls" : "../dlls",
+            "*.dll")
+        .Select(Path.GetFileName)
+        .OrderBy(x => x, StringComparer.Ordinal)
+        .ToArray();
 
     private sealed class Site
     {
