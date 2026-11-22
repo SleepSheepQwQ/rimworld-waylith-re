@@ -51,7 +51,7 @@ internal static class StartupHook
         if (Interlocked.Exchange(ref _done, 1) != 0) return;
         try
         {
-            string list = Environment.GetEnvironmentVariable("ANIMAL_DEFS") ?? "Ibex,Squirrel,Cow";
+            string list = Environment.GetEnvironmentVariable("ANIMAL_DEFS") ?? "Ibex,Boomalope,Squirrel,Cow";
             foreach (string raw in list.Split(','))
             {
                 string name = raw.Trim();
@@ -158,23 +158,51 @@ internal static class StartupHook
         // ------------------------------ live GetIconFor(Thing), best effort (no map in this harness)
         try
         {
-            Pawn pawn = PawnGenerator.GeneratePawn(kind, (Faction)null);
-            Log($"live.pawn kind={pawn?.kindDef?.defName} gender={pawn?.gender} spawned={pawn?.Spawned}");
-            object bg = null;
-            try { bg = pawn?.Drawer?.renderer?.BodyGraphic; }
-            catch (Exception e) { Log($"live.bodyGraphic.threw {e.GetType().Name}: {e.Message}"); }
-            Log($"live.bodyGraphic={(bg == null ? "null" : bg.GetType().Name)}");
+            Log($"live.game={(Current.Game == null ? "null" : "set")} map={(Current.Game?.CurrentMap == null ? "null" : "set")}");
+            Pawn pawn = null;
+            try { pawn = PawnGenerator.GeneratePawn(kind, (Faction)null); Log($"live.pawn.generated={(pawn != null)}"); }
+            catch (Exception e) { Log($"live.pawn.generate.threw {e.GetType().Name}: {e.Message}"); }
+            if (pawn != null)
+            {
+                Log($"live.pawn kind={pawn.kindDef?.defName} gender={pawn.gender} spawned={pawn.Spawned}");
+                Step("live.drawer", () => pawn.Drawer);
+                Step("live.renderer", () => pawn.Drawer.renderer);
+                Step("live.bodyGraphic", () => pawn.Drawer.renderer.BodyGraphic);
+                Step("live.ensureGraphics", () => { pawn.Drawer.renderer.EnsureGraphicsInitialized(); return "ok"; });
+                Step("live.bodyGraphic.afterEnsure", () => pawn.Drawer.renderer.BodyGraphic);
+                Step("live.bodyGraphic.east", () =>
+                {
+                    Graphic bg = pawn.Drawer.renderer.BodyGraphic;
+                    if (bg == null) return null;
+                    Material bm = bg.MatAt(Rot4.East);
+                    return $"material='{bm?.name}' shader='{bm?.shader?.name}' tex={TexInfo(bm?.mainTexture as Texture2D)}";
+                });
 
-            float scale = 0f, angle = 0f;
-            Vector2 prop = Vector2.one;
-            Color col = Color.white;
-            Material liveMat = null;
-            Texture icon = Widgets.GetIconFor(pawn, new Vector2(128f, 128f), Rot4.East, false,
-                                              out scale, out angle, out prop, out col, out liveMat);
-            Log($"live.geticonfor.thing tex={TexInfo(icon as Texture2D)} material='{liveMat?.name}' shader='{liveMat?.shader?.name}'");
-            Diag("live.geticonfor.thing.material", liveMat);
+                float scale = 0f, angle = 0f;
+                Vector2 prop = Vector2.one;
+                Color col = Color.white;
+                Material liveMat = null;
+                try
+                {
+                    Texture icon = Widgets.GetIconFor(pawn, new Vector2(128f, 128f), Rot4.East, false,
+                                                      out scale, out angle, out prop, out col, out liveMat);
+                    Log($"live.geticonfor.thing tex={TexInfo(icon as Texture2D)} material='{liveMat?.name}' shader='{liveMat?.shader?.name}'");
+                    Diag("live.geticonfor.thing.material", liveMat);
+                }
+                catch (Exception e) { Log($"live.geticonfor.thing.threw {e.GetType().Name}: {e.Message}"); }
+            }
         }
         catch (Exception e) { Log($"live.fail {e.GetType().Name}: {e.Message}"); }
+    }
+
+    private static void Step(string tag, Func<object> f)
+    {
+        try
+        {
+            object v = f();
+            Log($"{tag}={(v == null ? "null" : v.ToString())}");
+        }
+        catch (Exception e) { Log($"{tag}.threw {e.GetType().Name}: {e.Message}"); }
     }
 
     // ------------------------------------------------------------------ the exact UI-material construction
