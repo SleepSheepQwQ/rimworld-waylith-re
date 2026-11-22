@@ -168,7 +168,7 @@ internal static class StartupHook
             foreach (MethodInfo mi in typeof(Widgets).GetMethods(BindingFlags.Public | BindingFlags.Static)
                                                         .Where(m => m.Name == "GetIconFor"))
             {
-                PatchInfo info = Harmony.GetPatchInfo(mi);
+                Patches info = Harmony.GetPatchInfo(mi);
                 string posts = info == null ? "-" :
                     string.Join(";", info.Postfixes.Select(p =>
                         $"{p.PatchMethod.DeclaringType?.Name}.{p.PatchMethod.Name}[{p.owner}]"));
