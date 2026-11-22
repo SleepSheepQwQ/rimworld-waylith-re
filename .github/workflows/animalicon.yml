@@ -151,6 +151,8 @@ jobs:
               need(b, name, r"def\.uiIconMaterial\.name=.*shader='CutoutComplexUI'", "def.uiIconMaterial built on CutoutComplexUI")
               need(b, name, r"def\.uiIconMaterial\.registry=true", "CutoutComplexUI registered in ShaderRegistry")
               need(b, name, r"def\.uiIconMaterial\.name=.*shaderProps=[1-9]", "non-zero shader property count")
+              need(b, name, r"def\.uiIconMaterial\.st explicit=False resolved=\(0,0,1,1\) shaderReceives=\(0,1,1,-1\)", "the source-shader ST is the identity")
+              need(b, name, r"def\.uiIconMaterial\.bundleProbe precompiled=True scaleOffset=True flipV=False shaderReceives=\(1,1,0,0\)", "the asset-bundle ST transform swaps the identity to Unity order")
               need(b, name, r"def\.uiIconMaterial\.imguidraw passMaterial=ok program=ok path=material", "ImGui would take the material path for def.uiIconMaterial")
               need(b, name, r"body\.east\.name=.*shader='CutoutComplex'", "body material shader is CutoutComplex")
               need(b, name, r"body\.east\.mainTexture '[^']+' 128x128", "body material has a real texture")
@@ -163,8 +165,8 @@ jobs:
               if not b:
                   fail("%s: no live block" % name); return
               need(b, name, r"live\.pawn def=.* spawned=True", "a spawned %s pawn on the game's map" % name)
-              need(b, name, r"live2\.bodyGraphic\.east material='CutoutComplex_[^']*' shader='CutoutComplex' tex='[^']+' 128x128", "the live BodyGraphic material")
-              need(b, name, r"live2\.geticonfor\.thing tex='[^']+' 128x128 material='CutoutComplexUI_[^']*' shader='CutoutComplexUI'", "the live GetIconFor(Thing) material")
+              need(b, name, r"live2\.bodyGraphic\.east=material='CutoutComplex_[^']*' shader='CutoutComplex' tex='[^']+' 128x128", "the live BodyGraphic material")
+              need(b, name, r"live2\.geticonfor\.thing tex='[^']+' 128x128 .*material='CutoutComplexUI_[^']*' shader='CutoutComplexUI'", "the live GetIconFor(Thing) material")
 
           def drawable_control(name):
               b = block(name)
@@ -178,7 +180,7 @@ jobs:
               if not lb:
                   fail("%s: no live block" % name); return
               need(lb, name, r"live\.pawn def=.* spawned=True", "a spawned %s pawn on the game's map" % name)
-              need(lb, name, r"live2\.geticonfor\.thing tex='[^']+' 128x128 material='' shader=''", "the live GetIconFor(Thing) on the plain-texture path")
+              need(lb, name, r"live2\.geticonfor\.thing tex='[^']+' 128x128 .*material='' shader=''", "the live GetIconFor(Thing) on the plain-texture path")
 
           complex_def("Ibex")
           complex_def("Boomalope")

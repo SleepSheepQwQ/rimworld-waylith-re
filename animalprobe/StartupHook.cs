@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using RimWorld;
 using UnityEngine;
@@ -98,7 +99,7 @@ internal static class StartupHook
         if (def == null) { Log($"def={defName} missing"); return; }
 
         Log($"def={defName} category={def.category} animal={def.race?.Animal} humanlike={def.race?.Humanlike} uiIconPath='{def.uiIconPath}'");
-        Log($"def.uiIcon {TexInfo(def.uiIcon)}");
+        Log($"def.uiIcon {TexInfo(def.uiIcon)} {MipInfo(def.uiIcon)}");
         Log($"def.uiIconMaterial name='{def.uiIconMaterial?.name}' bad={ReferenceEquals(def.uiIconMaterial, BaseContent.BadMat)}");
         Diag("def.uiIconMaterial", def.uiIconMaterial);
 
@@ -310,7 +311,7 @@ internal static class StartupHook
                     Material mat = null;
                     Texture icon = Widgets.GetIconFor(pawn, new Vector2(128f, 128f), Rot4.East, false,
                                                       out scale, out angle, out prop, out col, out mat);
-                    Log($"live2.geticonfor.thing tex={TexInfo(icon as Texture2D)} material='{mat?.name}' shader='{mat?.shader?.name}'");
+                    Log($"live2.geticonfor.thing tex={TexInfo(icon as Texture2D)} {MipInfo(icon as Texture2D)} material='{mat?.name}' shader='{mat?.shader?.name}'");
                     Diag("live2.geticonfor.thing.material", mat);
                 }
                 catch (Exception e) { Log($"live2.geticonfor.thing.threw {e.GetType().Name}: {e.Message}"); }
@@ -404,6 +405,20 @@ internal static class StartupHook
                         var shaderSt = st;
                         if (engine.FlipTextureST) { shaderSt.Y = 1f - shaderSt.Y; shaderSt.W = -shaderSt.W; }
                         Log($"{tag}.st explicit={explicitSt} resolved=({F(st.X)},{F(st.Y)},{F(st.Z)},{F(st.W)}) shaderReceives=({F(shaderSt.X)},{F(shaderSt.Y)},{F(shaderSt.Z)},{F(shaderSt.W)})");
+
+                        // On device the shader comes from an asset bundle: AssetBundleShaders.cs:76 sets
+                        // ScaleOffsetTextureST=true and BuildDefinition sets flipTextureST=false. Reproduce
+                        // that shader object and let the engine's own MaterialBindingResolver produce the
+                        // uniform the fragment stage would receive.
+                        try
+                        {
+                            WR.Shader bundle = MakeBundleShader(engine);
+                            var bm = new WR.Material(bundle, "bundleprobe");
+                            bm.CopyPropertiesFrom(m.engineMaterial);
+                            System.Numerics.Vector4 bst = ResolveTextureST(bm, 16);
+                            Log($"{tag}.bundleProbe precompiled={(bundle.PrecompiledStages != null)} scaleOffset={(bundle.PrecompiledStages?.ScaleOffsetTextureST ?? false)} flipV={bundle.FlipTextureST} shaderReceives=({F(bst.X)},{F(bst.Y)},{F(bst.Z)},{F(bst.W)})");
+                        }
+                        catch (Exception e) { Log($"{tag}.bundleProbe threw {e.GetType().Name}: {e.Message}"); }
                     }
                 }
                 catch (Exception e) { Log($"{tag}.st threw {e.GetType().Name}: {e.Message}"); }
@@ -430,11 +445,55 @@ internal static class StartupHook
         catch (Exception e) { Log($"{tag}.diag failed {e.GetType().Name}: {e.Message}"); }
     }
 
+    private static WR.Shader MakeBundleShader(WR.Shader src)
+    {
+        var def = new WR.ShaderProgramDefinition();
+        foreach (FieldInfo f in typeof(WR.ShaderProgramDefinition).GetFields(BindingFlags.Public | BindingFlags.Instance))
+            f.SetValue(def, f.GetValue(src.Program));
+        def.flipTextureST = false;
+        var pre = new WR.PrecompiledShaderStages(Array.Empty<byte>(), Array.Empty<byte>(), true);
+        return new WR.Shader(src.Key + "#bundleprobe", src.ShaderPath, def, null, src.MaterialLayout,
+                             src.PipelineState, src.IconShaderKey, src.VertexInputLayout, pre);
+    }
+
+    private static System.Numerics.Vector4 ResolveTextureST(WR.Material material, int offset)
+    {
+        Type t = typeof(WR.Material).Assembly.GetType("Waylith.Rendering.MaterialBindingResolver");
+        if (t == null) throw new InvalidOperationException("MaterialBindingResolver not found");
+        MethodInfo mi = t.GetMethod("ResolveMaterialBindingData", BindingFlags.Public | BindingFlags.Static);
+        if (mi == null) throw new InvalidOperationException("ResolveMaterialBindingData not found");
+        object[] args = { material, null, null, false };
+        mi.Invoke(null, args);
+        object uniforms = args[1];
+        MethodInfo read = uniforms.GetType().GetMethod("ReadVector4", new[] { typeof(int) });
+        return (System.Numerics.Vector4)read.Invoke(uniforms, new object[] { offset });
+    }
+
     private static string TexInfo(Texture2D t)
     {
         if (t == null) return "null";
         string bad = ReferenceEquals(t, BaseContent.BadTex) ? " BADTEX" : "";
         return $"'{t.name}' {t.width}x{t.height}{bad}";
+    }
+
+    private static string MipInfo(Texture2D t)
+    {
+        if (t == null) return "mips=null";
+        int n = 1;
+        try { n = t.mipmapCount; } catch { }
+        var parts = new List<string>();
+        for (int i = 0; i < n; i++)
+        {
+            try
+            {
+                Color32[] px = t.GetPixels32(i);
+                int alpha = 0;
+                for (int j = 0; j < px.Length; j++) if (px[j].a > 0) alpha++;
+                parts.Add(i + ":" + alpha + "/" + px.Length);
+            }
+            catch (Exception e) { parts.Add(i + ":threw(" + e.GetType().Name + ")"); }
+        }
+        return "mips=" + n + " alpha=[" + string.Join(",", parts) + "]";
     }
 
     private static string F(float v) => v.ToString("0.###");
