@@ -142,21 +142,25 @@ namespace MatPool
             var setVec = One(u, "UnityEngine.Material", "SetVector", "SetVector(Int32");
             var setScale = One(u, "UnityEngine.Material", "SetTextureScale", "SetTextureScale(Int32");
             var trySt = One(u, "UnityEngine.Material", "TrySetTextureST");
+            var engineScale = One(w, "Waylith.Rendering.Material", "SetTextureScale", "SetTextureScale(Int32");
             var engineTransform = One(w, "Waylith.Rendering.Material", "SetTextureTransform", "SetTextureTransform(Int32");
-            if (setVec.IsNil || setScale.IsNil || trySt.IsNil || engineTransform.IsNil)
-                Broken.Add("Material.SetVector / SetTextureScale / TrySetTextureST / SetTextureTransform missing");
+            if (setVec.IsNil || setScale.IsNil || trySt.IsNil || engineScale.IsNil || engineTransform.IsNil)
+                Broken.Add("Material.SetVector / SetTextureScale / TrySetTextureST / engine SetTextureScale|Transform missing");
             else
             {
                 var sv = Steps(u, setVec);
                 var ss = Steps(u, setScale);
                 var st = Steps(u, trySt);
+                var es = Steps(w, engineScale);
                 var et = Steps(w, engineTransform);
                 Fact("Material.SetVector routes _ST names through TrySetTextureST",
                      sv.Any(s => s.Contains("TrySetTextureST")));
                 Fact("Material.SetTextureScale writes the same textureTransforms slot that TrySetTextureST reaches",
-                     ss.Any(s => s.Contains("GetTextureTransform"))
-                     && ss.Any(s => s.Contains("SetTextureSTProperty"))
+                     ss.Any(s => s.Contains("Waylith.Rendering.Material::SetTextureScale"))
                      && st.Any(s => s.Contains("SetTextureTransform"))
+                     && es.Any(s => s.Contains("GetTextureTransform"))
+                     && es.Any(s => s.Contains("textureTransforms"))
+                     && es.Any(s => s.Contains("SetTextureSTProperty"))
                      && et.Any(s => s.Contains("textureTransforms"))
                      && et.Any(s => s.Contains("SetTextureSTProperty")));
             }
