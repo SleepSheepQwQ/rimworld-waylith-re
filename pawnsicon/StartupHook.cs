@@ -10,6 +10,7 @@ using RimWorld;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Verse;
+using WR = Waylith.Rendering;
 
 /// <summary>
 /// The animal-list icon chain, measured on a real spawned pawn inside the real host:
@@ -360,6 +361,9 @@ internal static class StartupHook
              $"color={C(color)} scale={F(scale)} angle={F(angle)} proportions={F(proportions.x)},{F(proportions.y)} " +
              $"error='{iconErr}'");
 
+        // ---- the material's _MainTex_ST, read back the way a mod would read it ------------------
+        StDiag(name, material);
+
         // ---- what the draw call actually receives (Widgets.ThingIcon -> ThingIconWorker) -------
         _workerCalls = 0; _workerTex = "-"; _workerMat = "-";
         string drawErr = "-";
@@ -367,6 +371,183 @@ internal static class StartupHook
         catch (Exception e) { drawErr = $"{e.GetType().Name}: {OneLine(e.Message)} @ {Top(e)}"; }
         Line($"species={name} step=draw workerCalls={_workerCalls} workerTex='{_workerTex}' " +
              $"workerMat='{_workerMat}' error='{drawErr}'");
+    }
+
+    // ---- the material's _MainTex_ST -------------------------------------------------------------
+
+    /// <summary>
+    /// Reads _MainTex_ST back off the material Widgets.GetIconFor returned, plus the value the
+    /// engine would actually bind:
+    ///
+    ///   stRaw     - GetVector("_MainTex_ST") through reflection, i.e. what a mod sees
+    ///   stEngine  - the engine material's own TryGetVector (authoritative storage)
+    ///   stBound   - MaterialBindingResolver.ResolveMaterialBindingData for the shader the
+    ///               material carries here (headless: the GLSL source shader)
+    ///   stBundle  - the same resolution against a precompiled asset-bundle shader
+    ///               (ScaleOffsetTextureST=true, flipV=false), which is what the device draws
+    ///
+    /// Print all four. They are not interchangeable: the defect is exactly that the property and
+    /// the bound uniform disagree, and a fix that only changes stRaw without changing stBundle
+    /// would not change a single device pixel.
+    /// </summary>
+    private static void StDiag(string species, Material m)
+    {
+        if (m == null)
+        {
+            Line($"species={species} step=st material=<null> materialNull=True stRaw=<n/a> stEngine=<n/a> stBound=<n/a> stBundle=<n/a>");
+            return;
+        }
+        try
+        {
+            Type mt = m.GetType();
+            string overloads = string.Join(";", mt.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Where(x => x.Name == "SetVector")
+                .Select(x => "(" + string.Join("/", x.GetParameters().Select(p => p.ParameterType.Name)) + ")"));
+            // The exact lookup IconFallbackFix.TryNormalizeUiMaterial performs.
+            bool modSetVector = mt.GetMethod("SetVector", new[] { typeof(string), typeof(Vector4) }) != null;
+            bool modSetVectorNumerics = mt.GetMethod("SetVector", new[] { typeof(string), typeof(System.Numerics.Vector4) }) != null;
+
+            string via = "none", rawText = "<unread>";
+            object raw = null;
+            try
+            {
+                MethodInfo gv = mt.GetMethod("GetVector", new[] { typeof(string) });
+                if (gv != null)
+                {
+                    raw = gv.Invoke(m, new object[] { "_MainTex_ST" });
+                    via = "GetVector(string)";
+                }
+                else
+                {
+                    MethodInfo gvi = mt.GetMethod("GetVector", new[] { typeof(int) });
+                    if (gvi != null)
+                    {
+                        raw = gvi.Invoke(m, new object[] { Shader.PropertyToID("_MainTex_ST") });
+                        via = "GetVector(int)";
+                    }
+                    else via = "no-GetVector";
+                }
+            }
+            catch (Exception e) { via = "GetVector-threw:" + e.GetType().Name; }
+            if (raw != null) rawText = Vec(raw);
+
+            WR.Material wr = null;
+            string engineErr = "-";
+            try { wr = m.engineMaterial; }
+            catch (Exception e) { engineErr = e.GetType().Name + ": " + OneLine(e.Message); }
+
+            string stEngine = "<n/a>";
+            bool explicitSt = false;
+            if (wr != null)
+            {
+                try
+                {
+                    System.Numerics.Vector4 v;
+                    explicitSt = wr.TryGetVector(Shader.PropertyToID("_MainTex_ST"), out v);
+                    stEngine = V(v.X, v.Y, v.Z, v.W) + (explicitSt ? "" : "(default)");
+                }
+                catch (Exception e) { stEngine = "threw:" + e.GetType().Name; }
+            }
+
+            WR.Shader sh = null;
+            string resolve = "not-attempted";
+            int off = -1;
+            string def = "<n/a>";
+            bool flip = false, scaleOffset = false;
+            if (m.shader != null)
+            {
+                try { resolve = WR.ShaderRegistry.TryResolve(m.shader.name, out sh) ? "ok" : "miss"; }
+                catch (Exception e) { resolve = "threw:" + e.GetType().Name; }
+            }
+            if (sh != null)
+            {
+                flip = sh.FlipTextureST;
+                scaleOffset = sh.PrecompiledStages != null && sh.PrecompiledStages.ScaleOffsetTextureST;
+                foreach (var u in sh.MaterialLayout.UniformSlots)
+                {
+                    if (u.PropertyName != "_MainTex_ST") continue;
+                    off = u.Offset;
+                    def = V(u.DefaultValue.Vector4.X, u.DefaultValue.Vector4.Y,
+                            u.DefaultValue.Vector4.Z, u.DefaultValue.Vector4.W);
+                }
+            }
+
+            string bound = "<n/a>";
+            if (wr != null && off >= 0)
+            {
+                try { var b = ResolveTextureST(wr, off); bound = V(b.X, b.Y, b.Z, b.W); }
+                catch (Exception e) { bound = "threw:" + e.GetType().Name; }
+            }
+
+            string bundle = "<n/a>";
+            if (wr != null && sh != null && off >= 0)
+            {
+                try
+                {
+                    WR.Shader bs = MakeBundleShader(sh);
+                    var bm = new WR.Material(bs, "stprobe");
+                    bm.CopyPropertiesFrom(wr);
+                    var b = ResolveTextureST(bm, off);
+                    bundle = V(b.X, b.Y, b.Z, b.W);
+                }
+                catch (Exception e) { bundle = "threw:" + e.GetType().Name; }
+            }
+
+            Line($"species={species} step=st material='{m.name}' matType='{mt.FullName}' " +
+                 $"setVectorOverloads='{overloads}' modSetVector={modSetVector} modSetVectorNumerics={modSetVectorNumerics} " +
+                 $"stRaw={rawText} stRawVia='{via}' stEngine={stEngine} stExplicit={explicitSt} stDefault={def} " +
+                 $"stBound={bound} stBundle={bundle} flipV={flip} scaleOffset={scaleOffset} " +
+                 $"registry={(sh != null)} resolve='{resolve}' engineMaterialError='{engineErr}'");
+        }
+        catch (Exception e)
+        {
+            Line($"species={species} step=st FAILED {e.GetType().Name}: {OneLine(e.Message)}");
+        }
+    }
+
+    private static string Vec(object v)
+    {
+        if (v == null) return "<null>";
+        Type t = v.GetType();
+        FieldInfo[] fs = t.GetFields(BindingFlags.Public | BindingFlags.Instance);
+        float Get(string lower, string upper)
+        {
+            FieldInfo f = fs.FirstOrDefault(x => x.Name == lower) ?? fs.FirstOrDefault(x => x.Name == upper);
+            if (f == null) throw new InvalidOperationException("no " + lower + "/" + upper + " on " + t.Name);
+            return Convert.ToSingle(f.GetValue(v), CultureInfo.InvariantCulture);
+        }
+        return V(Get("x", "X"), Get("y", "Y"), Get("z", "Z"), Get("w", "W"));
+    }
+
+    private static string V(float x, float y, float z, float w)
+    {
+        return "(" + F(x) + "," + F(y) + "," + F(z) + "," + F(w) + ")";
+    }
+
+    /// <summary>A copy of the shader with the asset-bundle flags (ScaleOffsetTextureST=true, flipV=false).</summary>
+    private static WR.Shader MakeBundleShader(WR.Shader src)
+    {
+        var def = new WR.ShaderProgramDefinition();
+        foreach (FieldInfo f in typeof(WR.ShaderProgramDefinition).GetFields(BindingFlags.Public | BindingFlags.Instance))
+            f.SetValue(def, f.GetValue(src.Program));
+        def.flipTextureST = false;
+        var pre = new WR.PrecompiledShaderStages(Array.Empty<byte>(), Array.Empty<byte>(), true);
+        return new WR.Shader(src.Key + "#bundleprobe", src.ShaderPath, def, null, src.MaterialLayout,
+                             src.PipelineState, src.IconShaderKey, src.VertexInputLayout, pre);
+    }
+
+    /// <summary>The exact uniform MaterialBindingResolver would upload, read back from its own output.</summary>
+    private static System.Numerics.Vector4 ResolveTextureST(WR.Material material, int offset)
+    {
+        Type t = typeof(WR.Material).Assembly.GetType("Waylith.Rendering.MaterialBindingResolver");
+        if (t == null) throw new InvalidOperationException("MaterialBindingResolver not found");
+        MethodInfo mi = t.GetMethod("ResolveMaterialBindingData", BindingFlags.Public | BindingFlags.Static);
+        if (mi == null) throw new InvalidOperationException("ResolveMaterialBindingData not found");
+        object[] args = { material, null, null, false };
+        mi.Invoke(null, args);
+        object uniforms = args[1];
+        MethodInfo read = uniforms.GetType().GetMethod("ReadVector4", new[] { typeof(int) });
+        return (System.Numerics.Vector4)read.Invoke(uniforms, new object[] { offset });
     }
 
     // ---- helpers ------------------------------------------------------------------------------
