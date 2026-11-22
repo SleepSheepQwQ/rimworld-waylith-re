@@ -1,0 +1,174 @@
+name: animalicon
+
+# Does the animal icon column go blank because the UI material is CutoutComplexUI?
+#
+# One headless run of the real host. A generated texture-only mod gives the three real animal defs
+# (Ibex, Cow: bodyGraphicData shaderType=CutoutComplex; Squirrel: no shaderType -> Cutout) a
+# readable 128x128 texture, so a null uiIcon cannot be blamed on a missing fixture. The probe then
+# prints, for each def:
+#   * def.uiIcon and def.uiIconMaterial (the ThingDef overload's inputs)
+#   * the body graphic material at Rot4.East and the UI material Widgets.GetIconFor(Thing) builds
+#     from it (TryGetUIShader + TryGetRequestForMat + MaterialPool.MatFrom)
+#   * ShaderRegistry resolution, MaterialLayout property counts, the resolved _MainTex_ST and the
+#     exact ImGuiGuiBackend condition (passMaterial != null && Shader.Program != null)
+#   * the same texture on a plain Cutout graphic as the control
+#   * whether dropping def.uiIconMaterial (the 2.4.0 fix) still leaves the Thing path with a
+#     CutoutComplexUI material
+#
+# The gate demands the control (Squirrel / plain Cutout) to be drawable in the same run; without it
+# a CutoutComplexUI finding would not be interpretable.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'animalprobe/**'
+      - '.github/workflows/animalicon.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: animalicon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost + probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build animalprobe/AnimalProbe.csproj -c Release -v minimal
+
+      - name: Assemble + texture fixture for the animal defs
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+
+          MOD=run/Mods/AnimalProbe
+          mkdir -p "$MOD/About" "$MOD/Textures/Things/Pawn/Animal/Ibex" \
+                   "$MOD/Textures/Things/Pawn/Animal/Squirrel" "$MOD/Textures/Things/Pawn/Animal/Cow"
+          cat > "$MOD/About/About.xml" <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ModMetaData>
+            <name>AnimalProbe</name>
+            <author>ci</author>
+            <packageId>waylith.animalprobe</packageId>
+            <supportedVersions><li>1.7</li></supportedVersions>
+          </ModMetaData>
+          XML
+
+          # One real 128x128 ibex sprite, copied to every base name/direction the three defs ask for.
+          for base in IbexMale IbexFemale; do
+            for d in north east south west; do
+              cp animalprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Ibex/${base}_${d}.png"
+            done
+          done
+          for d in north east south west; do
+            cp animalprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Squirrel/Squirrel_${d}.png"
+            cp animalprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Cow/Bull_${d}.png"
+            cp animalprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Cow/Cow_${d}.png"
+          done
+          find "$MOD" -type f | sort
+
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          python3 - "$CFG/ModsConfig.xml" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p, encoding="utf-8").read()
+          s = s.replace("<li>ludeon.rimworld.odyssey</li>",
+                        "<li>ludeon.rimworld.odyssey</li>\n    <li>waylith.animalprobe</li>", 1)
+          open(p, "w", encoding="utf-8").write(s)
+          print(s)
+          PY
+
+      - name: Run the probe
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/animalprobe/bin/Release/net10.0/AnimalProbe.dll"
+          export ANIMAL_DEFS="Ibex,Squirrel,Cow"
+          export PROBE_TIMEOUT_MS=180000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/animal.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[ANIMAL\]' "$PWD/../out/animal.log" | tee "$PWD/../out/animal.txt" || true
+
+      - name: Gate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, sys
+          txt = open("out/animal.txt", encoding="utf-8", errors="replace").read()
+          print(txt)
+          ok = True
+
+          def fail(msg):
+              global ok
+              print("FAIL: " + msg)
+              ok = False
+
+          def block(name):
+              m = re.search(r"^\[ANIMAL\] ==== %s ====\n(.*?)(?=^\[ANIMAL\] ==== |^\[ANIMAL\] RESULT=)" % re.escape(name),
+                            txt, re.S | re.M)
+              return m.group(1) if m else ""
+
+          if "[ANIMAL] RESULT=DONE" not in txt:
+              fail("probe did not finish (RESULT=DONE missing)")
+
+          def need(b, name, pattern, what):
+              if not re.search(pattern, b, re.M):
+                  fail("%s: missing %s (%s)" % (name, what, pattern))
+
+          def complex_def(name):
+              b = block(name)
+              if not b:
+                  fail("%s: no block" % name); return
+              need(b, name, r"def\.uiIcon '[^']+' 128x128", "a non-empty 128x128 uiIcon")
+              need(b, name, r"def\.uiIconMaterial\.name=.*shader='CutoutComplexUI'", "def.uiIconMaterial built on CutoutComplexUI")
+              need(b, name, r"def\.uiIconMaterial\.registry=true", "CutoutComplexUI registered in ShaderRegistry")
+              need(b, name, r"def\.uiIconMaterial\.name=.*shaderProps=[1-9]", "non-zero shader property count")
+              need(b, name, r"def\.uiIconMaterial\.imguidraw passMaterial=ok program=ok path=material", "ImGui would take the material path for def.uiIconMaterial")
+              need(b, name, r"body\.east\.name=.*shader='CutoutComplex'", "body material shader is CutoutComplex")
+              need(b, name, r"body\.east\.mainTexture '[^']+' 128x128", "body material has a real texture")
+              need(b, name, r"geticonfor\.thing material='CutoutComplexUI_", "GetIconFor(Thing) builds a CutoutComplexUI material")
+              need(b, name, r"simulate\.dropDefMaterial defOverload\.material=''.*thingOverload\.material='CutoutComplexUI_", "dropping def.uiIconMaterial fixes only the Def overload")
+
+          def drawable_control(name):
+              b = block(name)
+              if not b:
+                  fail("%s: no block" % name); return
+              need(b, name, r"body\.east\.name=.*shader='Cutout'", "body material shader is plain Cutout")
+              need(b, name, r"body\.east\.mainTexture '[^']+' 128x128", "body material has a real texture")
+              need(b, name, r"geticonfor\.thing material='' shader=''", "GetIconFor(Thing) leaves material null on Cutout")
+              need(b, name, r"control\.cutout .* uiMap=False .*wouldBuild=null\(plain-texture path\)", "plain Cutout has no UI shader, i.e. the texture path")
+
+          complex_def("Ibex")
+          complex_def("Cow")
+          drawable_control("Squirrel")
+
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: animalicon-${{ github.run_id }}
+          path: out/animal.log
+          if-no-files-found: warn
