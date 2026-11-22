@@ -1,0 +1,219 @@
+name: activeprobe
+
+# Is UnityEngine.RenderTexture.active non-null at the moment the animal-list icon is drawn?
+#
+# The headless host never installs the ImGui backend (Bootstrap.ConfigureFrameRenderer is skipped
+# when Headless), so GuiBackend.Current is null and nothing would observe either draw path. The
+# probe installs a Recording backend and calls the same two functions the animal column calls:
+#
+#   Widgets.ThingIcon(Rect, ThingDef)                 the animal list row
+#     -> GenUI.DrawTextureWithMaterial(rect, tex, mat, new Rect(0,0,1,1))
+#          material != null -> Graphics.DrawTexture(...)  checks RenderTexture.active
+#          material == null -> GUI.DrawTextureWithTexCoords  ignores RenderTexture.active
+#
+# For Ibex/Boomalope (CutoutComplex -> material path) and Squirrel/Cow (Cutout -> texture path) it
+# prints active right before the call, the calls that reached the backend, and a positive control
+# with active forced to a real RenderTexture (which must produce zero backend calls). The live
+# phase repeats it on spawned pawns using Widgets.ThingIcon(Rect, Thing), the exact wildlife-row path.
+#
+# The same job runs the Mono.Cecil audit (activeil) that lists every writer of RenderTexture.active
+# in UnityStubs and every caller of Graphics.Blit/SetRenderTarget in the shipped assemblies.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'activeprobe/**'
+      - 'activeil/**'
+      - '.github/workflows/activeprobe.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: activeprobe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost, probe, IL audit
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build activeprobe/ActiveIconProbe.csproj -c Release -v minimal
+          dotnet build activeil/ActiveProbe.csproj -c Release -v minimal
+
+      - name: "Static audit (IL): writers of RenderTexture.active and Graphics.Blit callers"
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          dotnet run --project activeil/ActiveProbe.csproj -c Release --no-build > out/il.txt 2>&1
+          sed -n '1,120p' out/il.txt
+
+      - name: Assemble + texture fixture for the animal defs
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+
+          MOD=run/Mods/AnimalProbe
+          mkdir -p "$MOD/About" "$MOD/Textures/Things/Pawn/Animal/Ibex" \
+                   "$MOD/Textures/Things/Pawn/Animal/Boomalope" \
+                   "$MOD/Textures/Things/Pawn/Animal/Squirrel" "$MOD/Textures/Things/Pawn/Animal/Cow"
+          cat > "$MOD/About/About.xml" <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ModMetaData>
+            <name>AnimalProbe</name>
+            <author>ci</author>
+            <packageId>waylith.animalprobe</packageId>
+            <supportedVersions><li>1.7</li></supportedVersions>
+          </ModMetaData>
+          XML
+
+          for base in IbexMale IbexFemale; do
+            for d in north east south west; do
+              cp activeprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Ibex/${base}_${d}.png"
+            done
+          done
+          for d in north east south west; do
+            cp activeprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Boomalope/Boomalope_${d}.png"
+            cp activeprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Squirrel/Squirrel_${d}.png"
+            cp activeprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Cow/Bull_${d}.png"
+            cp activeprobe/ibex_east.png "$MOD/Textures/Things/Pawn/Animal/Cow/Cow_${d}.png"
+          done
+
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          python3 - "$CFG/ModsConfig.xml" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p, encoding="utf-8").read()
+          s = s.replace("<li>ludeon.rimworld.odyssey</li>",
+                        "<li>ludeon.rimworld.odyssey</li>\n    <li>waylith.animalprobe</li>", 1)
+          open(p, "w", encoding="utf-8").write(s)
+          print(s)
+          PY
+
+      - name: Run the probe
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/activeprobe/bin/Release/net10.0/ActiveIconProbe.dll"
+          export ANIMAL_MAP=1
+          export PROBE_TIMEOUT_MS=420000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/active.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[ACTIVE\]' "$PWD/../out/active.log" | tee "$PWD/../out/active.txt" || true
+
+      - name: Gate
+        run: |
+          set -euo pipefail
+          cat out/active.txt || true
+          python3 - <<'PY'
+          import os, re, sys
+          txt = open("out/active.txt", encoding="utf-8", errors="replace").read() if os.path.exists("out/active.txt") else ""
+          ok = True
+
+          def fail(msg):
+              global ok
+              print("FAIL: " + msg); ok = False
+
+          def find(pat):
+              m = re.search(pat, txt, re.M)
+              return m.group(0) if m else None
+
+          if "RESULT=DONE" not in txt:
+              fail("probe did not finish (RESULT=DONE missing)")
+
+          # The line immediately before the draw reports the value Graphics.DrawTexture will test.
+          # The backend-call counts prove the probe reached the real draw tail.
+          for name, kind in (("Ibex", "material"), ("Boomalope", "material"),
+                             ("Squirrel", "texcoords"), ("Cow", "texcoords")):
+              if not re.search(r"^\[ACTIVE\] %s: active\.before=null$" % name, txt, re.M):
+                  fail("%s: active before the draw was not null" % name)
+              line = find(r"^\[ACTIVE\] %s: draw\.def .*$" % name)
+              if not line:
+                  fail("%s: no draw.def line" % name)
+              elif ("calls=%s:1" % kind) not in line:
+                  fail("%s: Widgets.ThingIcon did not reach the backend as %s (%s)" % (name, kind, line))
+
+          for name, kind in (("Ibex", "material"), ("Boomalope", "material"),
+                             ("Squirrel", "texcoords"), ("Cow", "texcoords")):
+              line = find(r"^\[ACTIVE\] %s: direct\.material .*$" % name)
+              if not line or ("calls=%s:1" % kind) not in line:
+                  fail("%s: direct material/texcoord tail did not reach the backend (%s)" % (name, line))
+
+          # Positive control: with active non-null the material path must not reach the backend.
+          for name in ("Ibex", "Boomalope"):
+              line = find(r"^\[ACTIVE\] %s: direct\.material\.forced .*$" % name)
+              if not line:
+                  fail("%s: no forced-active control line" % name)
+              elif "calls=none" not in line:
+                  fail("%s: forced-active draw still reached the backend: %s" % (name, line))
+
+          # Live pawn path (Thing overload) on the real map.
+          for name, kind in (("Ibex", "material"), ("Squirrel", "texcoords")):
+              if not re.search(r"^\[ACTIVE\] %s: live active\.before=null$" % name, txt, re.M):
+                  fail("%s: live active before the draw was not null" % name)
+              line = find(r"^\[ACTIVE\] %s: live draw .*$" % name)
+              if not line or ("calls=%s:1" % kind) not in line:
+                  fail("%s: live Widgets.ThingIcon did not reach the backend (%s)" % (name, line))
+
+          # Transition log: every observed write except the forced RT is a write of null.
+          forced = [l for l in txt.splitlines() if l.startswith("[ACTIVE] transition 'ActiveProbe_Forced'")]
+          non_null = [l for l in txt.splitlines()
+                      if l.startswith("[ACTIVE] transition ") and "null <-" not in l
+                      and "ActiveProbe_Forced" not in l]
+          print("transitions forced=%d other-non-null=%d" % (len(forced), len(non_null)))
+          if len(forced) != 1:
+              fail("expected exactly one transition to the forced RT, saw %d" % len(forced))
+          if non_null:
+              fail("unexpected non-null active transitions: %s" % non_null[:3])
+
+          print("ACTIVE GATE:", "PASS" if ok else "FAIL")
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## activeprobe — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- dlls: Assembly-CSharp $(stat -c%s dlls/Assembly-CSharp.dll) B, UnityStubs $(stat -c%s dlls/UnityStubs.dll) B, Waylith $(stat -c%s dlls/Waylith.dll) B"
+            echo ""
+            echo '```'
+            grep -E '^\[ACTIVE\]' out/active.txt 2>/dev/null || echo '(no probe output)'
+            echo '```'
+            echo ""
+            echo '### static IL audit'
+            echo '```'
+            sed -n '1,60p' out/il.txt 2>/dev/null || echo '(no il output)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: activeprobe-${{ github.run_id }}
+          path: |
+            out/active.txt
+            out/active.log
+            out/il.txt
+            out/assemble.log
+          if-no-files-found: warn
