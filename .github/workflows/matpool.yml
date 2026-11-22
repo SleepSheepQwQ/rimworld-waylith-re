@@ -61,7 +61,7 @@ jobs:
             echo '### matpool'
             echo
             echo '```'
-            grep -E '^\[(FACT|BROKEN|INFO|SCENARIO|PASS|FAIL|BLOAT|CENSUS|SUMMARY)\]|^RESULT:' mat/out/matpool.log || true
+            grep -E '^\[(FACT|BROKEN|INFO|SCENARIO|PASS|FAIL|BLOAT|CENSUS|SUMMARY|SCAN|SITE|IMPACT)\]|^RESULT:' mat/out/matpool.log || true
             echo '```'
             echo
             cat mat/out/matpool-table.md 2>/dev/null || true

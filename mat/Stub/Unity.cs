@@ -9,6 +9,7 @@ namespace UnityEngine
     public class Object
     {
         private string _name = "";
+        private bool _destroyed;
 
         public virtual string name
         {
@@ -18,33 +19,90 @@ namespace UnityEngine
 
         public int GetInstanceID() { return RuntimeHelpers.GetHashCode(this); }
 
-        // Unity's Object == is reference identity for a live object, and that is what
-        // Verse.MaterialRequest.Equals compares shader / mainTex / maskTex with.
-        public static bool operator ==(Object a, Object b) { return ReferenceEquals(a, b); }
-        public static bool operator !=(Object a, Object b) { return !ReferenceEquals(a, b); }
+        public bool IsDestroyed { get { return _destroyed; } }
+
+        // Exact shape of the shipped UnityStubs operator: reference equality, then the
+        // destroyed flag decides comparisons against null. A destroyed object is "fake null"
+        // to `if (obj == null)` but still a live managed reference.
+        public static bool operator ==(Object a, Object b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (ReferenceEquals(b, null)) return a._destroyed;
+            if (ReferenceEquals(a, null)) return b._destroyed;
+            return false;
+        }
+        public static bool operator !=(Object a, Object b) { return !(a == b); }
 
         // `if (mat)` in the shipped IL (ldsfld Material, brtrue) is this conversion.
-        public static implicit operator bool(Object o) { return !ReferenceEquals(o, null); }
+        public static implicit operator bool(Object o) { return !ReferenceEquals(o, null) && !o._destroyed; }
+
+        // Object.Destroy's no-runtime branch (the one a headless host and an unregistered
+        // asset take): Dispose() then mark destroyed, in that order.
+        public static void Destroy(Object o)
+        {
+            if (o == null) return;
+            if (o is IDisposable d) d.Dispose();
+            o._destroyed = true;
+        }
+
+        public static void DestroyImmediate(Object o) { Destroy(o); }
+        public static void DestroyImmediate(Object o, bool allowDestroyingAssets) { Destroy(o); }
 
         public override bool Equals(object o) { return ReferenceEquals(this, o); }
         public override int GetHashCode() { return RuntimeHelpers.GetHashCode(this); }
         public override string ToString() { return _name; }
     }
 
-    public class Texture : Object
+    public class Texture : Object, IDisposable
     {
         public int width { get; set; }
         public int height { get; set; }
 
-        // Declared again because the IL calls Texture::op_Equality / op_Inequality by name.
-        public static bool operator ==(Texture a, Texture b) { return ReferenceEquals(a, b); }
-        public static bool operator !=(Texture a, Texture b) { return !ReferenceEquals(a, b); }
+        // The two pieces Waylith's Texture.Dispose actually touches: the GPU allocation is
+        // released and nulled, the CPU pixel data is left in place. Modelled as opaque handles;
+        // only null / non-null is asserted.
+        public object GpuResource { get; set; }
+        public object CpuData { get; set; }
+
+        private bool _disposed;
+
+        public bool IsDisposed { get { return _disposed; } }
+
+        public void Dispose()
+        {
+            GpuResource = null;
+            _disposed = true;
+        }
+
+        // Exact shape of the shipped UnityStubs Texture.operator==: not Object's _destroyed
+        // flag, but _disposed. This is why a texture that was Destroy()ed (Dispose + mark)
+        // reads as null to MaterialPool's `req.mainTex == null` guard.
+        public static bool operator ==(Texture a, Texture b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            bool da = ReferenceEquals(a, null) ? true : a._disposed;
+            bool db = ReferenceEquals(b, null) ? true : b._disposed;
+            if (da | db) return da == db;
+            return false;
+        }
+        public static bool operator !=(Texture a, Texture b) { return !(a == b); }
+
+        public override bool Equals(object o) { return o is Texture t && this == t; }
+        public override int GetHashCode() { return RuntimeHelpers.GetHashCode(this); }
     }
 
     public class Texture2D : Texture
     {
         public Texture2D() { }
-        public Texture2D(int w, int h) { width = w; height = h; }
+        public Texture2D(int w, int h)
+        {
+            width = w;
+            height = h;
+            // A loaded texture owns both a GPU allocation and CPU pixels. Destroy() releases
+            // only the former (Waylith.Rendering.Texture.Dispose), which is the state G asserts.
+            GpuResource = new object();
+            CpuData = new object();
+        }
     }
 
     public class RenderTexture : Texture
@@ -217,6 +275,33 @@ namespace UnityEngine
         public Object asset { get { return null; } }
     }
 
+    // ContentFinder<Texture2D>.Get falls through to Resources.Load when no mod holder has the
+    // path. The harness needs exactly one such fixture - UI/Misc/BadTexture - so BaseContent's
+    // static initialiser can finish and MatFrom's null-source path returns the real BadMat
+    // instead of tripping over a missing asset (a harness artefact, not a game fact).
+    public static class Resources
+    {
+        private static readonly Dictionary<string, Object> Fixtures = new Dictionary<string, Object>();
+
+        public static void Register(string pathSuffix, Object obj)
+        {
+            lock (Fixtures) Fixtures[pathSuffix] = obj;
+        }
+
+        public static T Load<T>(string path) where T : Object
+        {
+            lock (Fixtures)
+            {
+                foreach (var kv in Fixtures)
+                    if (path != null && path.EndsWith(kv.Key, StringComparison.Ordinal)) return kv.Value as T;
+            }
+            return null;
+        }
+
+        public static T[] LoadAll<T>(string path) where T : Object { return new T[0]; }
+        public static void UnloadAsset(Object obj) { }
+    }
+
     public class Material : Object
     {
         // Every applied property, in order. Two materials can then be compared property by property
@@ -228,6 +313,25 @@ namespace UnityEngine
         public Color color { get; set; }
         public int renderQueue { get; set; }
 
+        // _MainTex_ST lives here, shared by every caller that got this material from the pool.
+        // mainTextureScale/Offset and SetVector("_MainTex_ST") address the same two entries,
+        // exactly as the shipped UnityStubs Material routes both to MaterialTextureTransform.
+        private readonly Dictionary<int, Vector2> _scales = new Dictionary<int, Vector2>();
+        private readonly Dictionary<int, Vector2> _offsets = new Dictionary<int, Vector2>();
+        private readonly Dictionary<int, Vector4> _vectors = new Dictionary<int, Vector4>();
+
+        public Vector2 mainTextureScale
+        {
+            get { return GetTextureScale(Shader.PropertyToID("_MainTex")); }
+            set { SetTextureScale(Shader.PropertyToID("_MainTex"), value); }
+        }
+
+        public Vector2 mainTextureOffset
+        {
+            get { return GetTextureOffset(Shader.PropertyToID("_MainTex")); }
+            set { SetTextureOffset(Shader.PropertyToID("_MainTex"), value); }
+        }
+
         public Material(Shader s) { shader = s; }
 
         public Material(Material src)
@@ -237,6 +341,9 @@ namespace UnityEngine
             color = src.color;
             renderQueue = src.renderQueue;
             Applied.AddRange(src.Applied);
+            foreach (var kv in src._scales) _scales[kv.Key] = kv.Value;
+            foreach (var kv in src._offsets) _offsets[kv.Key] = kv.Value;
+            foreach (var kv in src._vectors) _vectors[kv.Key] = kv.Value;
         }
 
         // MaterialAllocator.Create takes this branch when no ShaderDef is loaded; the real one defers
@@ -248,6 +355,65 @@ namespace UnityEngine
         public void SetColor(int id, Color c) { Applied.Add("col:" + Shader.PropertyToIDName(id) + "=" + c); }
         public void SetColor(string n, Color c) { Applied.Add("col:" + n + "=" + c); }
         public void SetFloat(string n, float v) { Applied.Add("flt:" + n + "=" + v.ToString("0.###")); }
-        public void SetVector(string n, Vector4 v) { Applied.Add("vec:" + n + "=" + v); }
+
+        public void SetTextureScale(int id, Vector2 v)
+        {
+            _scales[id] = v;
+            Applied.Add("st-scale:" + Shader.PropertyToIDName(id) + "=" + v);
+        }
+
+        public void SetTextureScale(string n, Vector2 v) { SetTextureScale(Shader.PropertyToID(n), v); }
+
+        public void SetTextureOffset(int id, Vector2 v)
+        {
+            _offsets[id] = v;
+            Applied.Add("st-offset:" + Shader.PropertyToIDName(id) + "=" + v);
+        }
+
+        public void SetTextureOffset(string n, Vector2 v) { SetTextureOffset(Shader.PropertyToID(n), v); }
+
+        public Vector2 GetTextureScale(int id)
+        {
+            Vector2 v;
+            return _scales.TryGetValue(id, out v) ? v : new Vector2(1f, 1f);
+        }
+
+        public Vector2 GetTextureOffset(int id)
+        {
+            Vector2 v;
+            return _offsets.TryGetValue(id, out v) ? v : new Vector2(0f, 0f);
+        }
+
+        public void SetVector(int id, Vector4 v)
+        {
+            string n = Shader.PropertyToIDName(id);
+            if (n.EndsWith("_ST", StringComparison.Ordinal))
+            {
+                // TextureST.Reorder + TrySetTextureST: property (offset.x, offset.y, scale.x, scale.y)
+                // is stored as offset=(x,y), scale=(z,w).
+                _offsets[id] = new Vector2(v.x, v.y);
+                _scales[id] = new Vector2(v.z, v.w);
+            }
+            else
+            {
+                _vectors[id] = v;
+            }
+            Applied.Add("vec:" + n + "=" + v);
+        }
+
+        public void SetVector(string n, Vector4 v) { SetVector(Shader.PropertyToID(n), v); }
+
+        public Vector4 GetVector(string n)
+        {
+            int id = Shader.PropertyToID(n);
+            if (n.EndsWith("_ST", StringComparison.Ordinal))
+            {
+                Vector2 o = GetTextureOffset(id);
+                Vector2 s = GetTextureScale(id);
+                return new Vector4(o.x, o.y, s.x, s.y);
+            }
+            Vector4 v;
+            return _vectors.TryGetValue(id, out v) ? v : new Vector4(0f, 0f, 0f, 0f);
+        }
     }
 }

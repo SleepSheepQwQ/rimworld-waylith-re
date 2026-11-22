@@ -90,6 +90,80 @@ namespace MatPool
                  !ghIl.Any(s => s.Contains("needsMainTex")));
         }
 
+        public void RunUnity(string unityPath, string waylithPath)
+        {
+            if (!System.IO.File.Exists(unityPath)) { Broken.Add("UnityStubs.dll not found at " + unityPath); return; }
+            var u = Dll.Open(unityPath);
+
+            // ---------------------------------------------------------------- Destroy's two effects
+            var destroy = One(u, "UnityEngine.Object", "Destroy");
+            if (destroy.IsNil) { Broken.Add("UnityEngine.Object::Destroy not found"); return; }
+            var dIl = Steps(u, destroy);
+            Fact("Object.Destroy disposes the IDisposable and then sets _destroyed",
+                 dIl.Any(s => s.Contains("System.IDisposable::Dispose"))
+                 && dIl.Any(s => s.Contains("stfld UnityEngine.Object::_destroyed")));
+
+            var texDispose = One(u, "UnityEngine.Texture", "Dispose", "Dispose(System.Boolean)");
+            if (texDispose.IsNil) { Broken.Add("UnityEngine.Texture::Dispose(bool) not found"); return; }
+            var tdIl = Steps(u, texDispose);
+            Fact("Texture.Dispose(bool) calls the core Waylith texture Dispose and sets _disposed",
+                 tdIl.Any(s => s.Contains("Waylith.Rendering.Texture::Dispose"))
+                 && tdIl.Any(s => s.Contains("stfld UnityEngine.Texture::_disposed")));
+
+            // Texture's operator decides null-ness by _disposed, not by Object's _destroyed.
+            var texEq = One(u, "UnityEngine.Texture", "op_Equality");
+            if (texEq.IsNil) { Broken.Add("UnityEngine.Texture::op_Equality not found"); return; }
+            var teIl = Steps(u, texEq);
+            Fact("Texture.op_Equality reads _disposed and never _destroyed (a Destroy()ed texture is fake-null)",
+                 teIl.Any(s => s.Contains("ldfld UnityEngine.Texture::_disposed"))
+                 && !teIl.Any(s => s.Contains("_destroyed")));
+
+            var objEq = One(u, "UnityEngine.Object", "op_Equality");
+            if (!objEq.IsNil)
+            {
+                var oeIl = Steps(u, objEq);
+                Fact("Object.op_Equality reads _destroyed", oeIl.Any(s => s.Contains("ldfld UnityEngine.Object::_destroyed")));
+            }
+            else Broken.Add("UnityEngine.Object::op_Equality not found");
+
+            // ---------------------------------------------------------------- the GPU/CPU split
+            if (!System.IO.File.Exists(waylithPath)) { Broken.Add("Waylith.dll not found at " + waylithPath); return; }
+            var w = Dll.Open(waylithPath);
+            var coreDispose = One(w, "Waylith.Rendering.Texture", "Dispose");
+            if (coreDispose.IsNil) { Broken.Add("Waylith.Rendering.Texture::Dispose not found"); return; }
+            var cdIl = Steps(w, coreDispose);
+            Fact("Waylith.Rendering.Texture.Dispose disposes GpuResource and nulls it, and does not touch CpuData",
+                 cdIl.Any(s => s.Contains("get_GpuResource"))
+                 && cdIl.Any(s => s.Contains("GpuTextureAllocation::Dispose"))
+                 && cdIl.Any(s => s.Contains("set_GpuResource"))
+                 && !cdIl.Any(s => s.Contains("CpuData")));
+
+            // ---------------------------------------------------------------- ST routes
+            var setVec = One(u, "UnityEngine.Material", "SetVector", "SetVector(System.Int32");
+            var setScale = One(u, "UnityEngine.Material", "SetTextureScale", "SetTextureScale(System.Int32");
+            var trySt = One(u, "UnityEngine.Material", "TrySetTextureST");
+            if (setVec.IsNil || setScale.IsNil || trySt.IsNil)
+                Broken.Add("Material.SetVector / SetTextureScale / TrySetTextureST missing");
+            else
+            {
+                var sv = Steps(u, setVec);
+                var ss = Steps(u, setScale);
+                var st = Steps(u, trySt);
+                Fact("Material.SetVector routes _ST names through TrySetTextureST",
+                     sv.Any(s => s.Contains("TrySetTextureST")));
+                Fact("Material.SetTextureScale and TrySetTextureST share SetTextureTransform (one _MainTex_ST storage)",
+                     ss.Any(s => s.Contains("SetTextureTransform"))
+                     && st.Any(s => s.Contains("SetTextureTransform")));
+            }
+        }
+
+        static MethodDefinitionHandle One(Dll d, string type, string method, string sig = null)
+        {
+            foreach (var h in d.Methods(type, method))
+                if (sig == null || d.MethodSignature(h).Contains(sig)) return h;
+            return default(MethodDefinitionHandle);
+        }
+
         // ------------------------------------------------------------------ helpers
 
         void Fact(string what, bool holds)

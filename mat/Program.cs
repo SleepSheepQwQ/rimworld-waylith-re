@@ -150,6 +150,7 @@ namespace MatPool
 
             var facts = new Facts(Dll.Open(casm));
             facts.Run();
+            facts.RunUnity(Path.Combine(dlls, "UnityStubs.dll"), Path.Combine(dlls, "Waylith.dll"));
             foreach (string f in facts.Ok) Say("[FACT] " + f);
             foreach (string f in facts.Broken) Say("[BROKEN] " + f);
             if (facts.Broken.Count > 0)
@@ -158,6 +159,8 @@ namespace MatPool
                 Say("RESULT: BROKEN");
                 return ExitBroken;
             }
+
+            STScan.Run(Dll.Open(casm));
 
             // 2. boot the game's own code, head-less
             SetStatic(typeof(UnityDataInitializer), "initializing", true);
@@ -173,6 +176,8 @@ namespace MatPool
             Say("[INFO] Assembly-CSharp " + typeof(MaterialPool).Assembly.GetName().Version
                 + ", shader=" + _shader.name + ", mask-supported=" + ShaderUtility.SupportsMaskTex(_shader)
                 + ", pool=" + PoolSize());
+
+            PrimeBadContent();
 
             // A mask difference can only be a cache-key difference if the shader can consume a mask;
             // otherwise MatFrom nulls maskTex and case C would silently equal case A.
@@ -191,6 +196,8 @@ namespace MatPool
             ScenarioC();
             ScenarioD();
             ScenarioE();
+            ScenarioF();
+            ScenarioG();
 
             Census();
 
@@ -304,6 +311,157 @@ namespace MatPool
             Check("E: a visible colour difference misses", !ReferenceEquals(a, far), "0.5 vs 0.6");
             Check("E: pool holds exactly two", PoolSize() == 2, "pool=" + PoolSize());
             Row("E", "tex", "colour < 1/255 vs >= 1/255", "2", "yes then no", "quantised hit");
+        }
+
+        // ------------------------------------------------------------------ fixture
+
+        static bool _badContent;
+
+        // BaseContent's cctor builds BadMat from UI/Misc/BadTexture. The texture subset is not in
+        // this harness, so without a fixture the cctor would fail or leave BadMat null - a harness
+        // artefact. One 2x2 texture is registered under that path, which lets the real cctor build
+        // the real BadMat. If this fails the run says BROKEN: case G would otherwise compare null
+        // with null and "prove" nothing.
+        static void PrimeBadContent()
+        {
+            var bad = new Texture2D(2, 2) { name = "BadTexture" };
+            UnityEngine.Resources.Register("UI/Misc/BadTexture", bad);
+            try
+            {
+                Material badMat = Verse.BaseContent.BadMat;
+                Texture2D badTex = Verse.BaseContent.BadTex;
+                _badContent = badMat != null && ReferenceEquals(badTex, bad);
+                Say("[INFO] BaseContent fixture: BadMat=" + (badMat == null ? "null" : badMat.name)
+                    + ", BadTex=" + (badTex == null ? "null" : badTex.name)
+                    + ", pool=" + PoolSize());
+            }
+            catch (Exception e)
+            {
+                Say("[BROKEN] BaseContent fixture threw " + e.GetType().Name + ": " + e.Message);
+            }
+        }
+
+        // ------------------------------------------------------------------ F: _MainTex_ST is not in the key
+
+        static string V2(Vector2 v) { return "(" + v.x.ToString("0.###") + "," + v.y.ToString("0.###") + ")"; }
+
+        // Same eight request fields, two consumers that want different tiling. MatFrom cannot tell
+        // them apart because _MainTex_ST is a property of the Material it returns, not of the key.
+        static void ScenarioF()
+        {
+            ResetPool();
+            var tex = Tex("TexF");
+            Material a = MaterialPool.MatFrom(Req(tex, Color.white));
+            a.mainTextureScale = new Vector2(2f, 3f);
+            a.mainTextureOffset = new Vector2(0.25f, 0.5f);
+            Vector2 aScale = a.mainTextureScale, aOffset = a.mainTextureOffset;
+
+            Material b = MaterialPool.MatFrom(Req(tex, Color.white));
+            int poolAfterB = PoolSize();
+
+            Say("[SCENARIO] F same 8 request fields, two consumers that write different _MainTex_ST");
+            Say("[INFO] F consumer A asked for scale=" + V2(aScale) + " offset=" + V2(aOffset)
+                + "; B now writes _MainTex_ST=(0,0,1,1) (offset 0,0 / scale 1,1)");
+            Check("F: MatFrom returns the same instance for both consumers", ReferenceEquals(a, b));
+            Check("F: the second consumer adds nothing to the pool", poolAfterB == 1, "pool=" + poolAfterB);
+
+            b.SetVector("_MainTex_ST", new Vector4(0f, 0f, 1f, 1f));
+            Vector2 aScaleAfter = a.mainTextureScale, aOffsetAfter = a.mainTextureOffset;
+            Check("F: B's _MainTex_ST write is visible on A's material (A now reads B's ST)",
+                  V2(aScaleAfter) == V2(new Vector2(1f, 1f)) && V2(aOffsetAfter) == V2(new Vector2(0f, 0f)),
+                  "A reads scale=" + V2(aScaleAfter) + " offset=" + V2(aOffsetAfter));
+
+            b.mainTextureScale = new Vector2(4f, 5f);
+            Vector4 aRaw = a.GetVector("_MainTex_ST");
+            Check("F: mainTextureScale and SetVector(\"_MainTex_ST\") are one storage (A reads scale 4,5)",
+                  V2(a.mainTextureScale) == V2(new Vector2(4f, 5f)) && V2(a.mainTextureOffset) == V2(new Vector2(0f, 0f)),
+                  "A reads _MainTex_ST=" + aRaw);
+            Check("F: _MainTex_ST is in Unity order (offset.x, offset.y, scale.x, scale.y)",
+                  Math.Abs(aRaw.x) < 1e-6f && Math.Abs(aRaw.y) < 1e-6f && Math.Abs(aRaw.z - 4f) < 1e-6f && Math.Abs(aRaw.w - 5f) < 1e-6f,
+                  "raw=" + aRaw);
+
+            Material clone = new Material(a);
+            clone.mainTextureScale = new Vector2(2f, 3f);
+            clone.mainTextureOffset = new Vector2(0.25f, 0.5f);
+            Check("F: a per-use clone keeps its own ST (the pooled material is untouched)",
+                  !ReferenceEquals(clone, a)
+                  && V2(clone.mainTextureScale) == V2(new Vector2(2f, 3f))
+                  && V2(a.mainTextureScale) == V2(new Vector2(4f, 5f)),
+                  "clone scale=" + V2(clone.mainTextureScale) + " pooled scale=" + V2(a.mainTextureScale));
+
+            Say("[IMPACT] F: 2 consumers, 1 material, 1 _MainTex_ST; last writer wins and the two tilings can never coexist.");
+            Say("[IMPACT] F: a clone costs one Material per distinct ST; the pool still holds the original.");
+            Row("F", "tex, colour (same 8 fields)", "_MainTex_ST (not in key)", poolAfterB.ToString(), "yes", "shared - last write wins");
+        }
+
+        // ------------------------------------------------------------------ G: destroyed mainTex
+
+        static void ScenarioG()
+        {
+            ResetPool();
+            var tex = Tex("TexG");
+            Material m1 = MaterialPool.MatFrom(Req(tex, Color.white));
+            Texture2D before = (Texture2D)m1.mainTexture;
+            object gpuBefore = before.GpuResource;
+            object cpuBefore = before.CpuData;
+            int poolBefore = PoolSize();
+
+            Say("[SCENARIO] G the request's mainTex is destroyed, then MatFrom is called again");
+            Check("G: before destroy the material has a GPU resource and CPU data",
+                  gpuBefore != null && cpuBefore != null);
+
+            UnityEngine.Object.Destroy(tex);
+            Say("[INFO] G after Destroy: tex==null is " + (tex == null)
+                + ", ReferenceEquals(tex,null) is " + ReferenceEquals(tex, null)
+                + ", GpuResource=" + (tex.GpuResource == null ? "null" : "live")
+                + ", CpuData=" + (tex.CpuData == null ? "null" : "live"));
+            Check("G: the texture is destroyed and fake-null", tex.IsDestroyed && tex == null);
+            Check("G: the managed reference is still alive", !ReferenceEquals(tex, null));
+            Check("G: GpuResource is released and nulled", tex.GpuResource == null);
+            Check("G: CpuData is retained (Dispose does not clear it)", tex.CpuData != null);
+
+            Material m2 = MaterialPool.MatFrom(Req(tex, Color.white));
+            Say("[INFO] G MatFrom -> " + (m2 == null ? "null" : m2.name)
+                + " (BaseContent.BadMat=" + (Verse.BaseContent.BadMat == null ? "null" : Verse.BaseContent.BadMat.name) + ")");
+            if (!_badContent) { Say("[BROKEN] G cannot vouch for MatFrom's null-source return: BaseContent.BadMat was not built"); Failures.Add("G fixture"); }
+            else Check("G: MatFrom returns BaseContent.BadMat, not the cached material",
+                       ReferenceEquals(m2, Verse.BaseContent.BadMat) && !ReferenceEquals(m2, m1));
+            Check("G: the pool still holds the old material (nothing evicts it)", PoolSize() == poolBefore, "pool=" + PoolSize());
+            Check("G: the old material's mainTexture is the destroyed texture", ReferenceEquals(m1.mainTexture, tex));
+            Check("G: that mainTexture reads as null (fake-null)", m1.mainTexture == null);
+            Check("G: the old material itself is still alive", m1 != null);
+            Check("G: TryGetRequestForMat still maps the old material back to the destroyed texture",
+                  MaterialPool.TryGetRequestForMat(m1, out var staleReq) && ReferenceEquals(staleReq.mainTex, tex));
+
+            var sameKey = Req(tex, Color.white);
+            Check("G: the request key still equals the stale entry (the null-source guard is the only stop)",
+                  Pool().Contains(sameKey) && sameKey.Equals(Req(tex, Color.white)));
+
+            // The guard only runs when needsMainTex is true. A shader-only request that later gets a
+            // mainTex is a request shape the game itself constructs, and it does reach the stale entry.
+            var bypass = new MaterialRequest(_shader);
+            bypass.mainTex = tex;
+            bypass.color = Color.white;
+            bypass.colorTwo = Color.white;
+            Material m3 = MaterialPool.MatFrom(bypass);
+            Check("G: a needsMainTex=false request with the destroyed mainTex DOES return the stale material",
+                  ReferenceEquals(m3, m1), "returned " + (m3 == null ? "null" : m3.name));
+
+            // A destroyed Material is not guarded at all: the dictionary returns the dead object.
+            ResetPool();
+            var tex2 = Tex("TexG2");
+            Material dead = MaterialPool.MatFrom(Req(tex2, Color.white));
+            UnityEngine.Object.Destroy(dead);
+            Material again = MaterialPool.MatFrom(Req(tex2, Color.white));
+            Say("[INFO] G3 destroyed Material: MatFrom -> " + (again == null ? "null(fake)" : again.name)
+                + ", ReferenceEquals(old,new)=" + ReferenceEquals(dead, again) + ", pool=" + PoolSize());
+            Check("G3: MatFrom returns the destroyed Material for the same request",
+                  ReferenceEquals(dead, again) && again == null);
+            Check("G3: the dead material stays in the pool", PoolSize() == 1, "pool=" + PoolSize());
+
+            Say("[IMPACT] G: after Destroy, pool=1 stale entry, mainTexture=fake-null, GpuResource=null, CpuData=live.");
+            Say("[IMPACT] G: a normal request gets BadMat; a needsMainTex=false request and a destroyed Material both get the stale object.");
+            Row("G", "tex (destroyed)", "same request", "1", "BadMat (normal) / stale (bypass)", "stale entry never evicted");
         }
 
         // ------------------------------------------------------------------ census
