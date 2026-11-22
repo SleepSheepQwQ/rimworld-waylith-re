@@ -1,0 +1,155 @@
+name: pawnsicon
+
+# Does GlyphFix 2.7.1 clear the CutoutComplexUI material that Widgets.GetIconFor(Thing) synthesises
+# for a non-humanlike pawn - while 2.7.0 leaves it in place (the blank animal-list icon)?
+#
+# One real host, one generated animal art set, two runs that differ only in the mod build:
+#
+#   A  GlyphFix 2.7.0 release zip        expect tex=Rat_east/IbexMale_east, material=CutoutComplexUI_*
+#   B  GlyphFix 2.7.1 source (rel/2.7.1) expect the same texture, material=<null>
+#
+# Squirrel (plain Cutout shader) is the control: material is null in both runs, so a green gate
+# cannot come from "the probe prints null for everything".
+#
+# The probe generates the pawn with PawnGenerator, spawns it with GenSpawn into the map the game's
+# own Play scene built, and calls the exact 9-argument Widgets.GetIconFor that Widgets.ThingIcon
+# calls. It also hooks Widgets.ThingIconWorker, so the material that reaches the draw call is
+# observed rather than inferred.
+on:
+  push:
+    paths:
+      - 'pawnsicon/**'
+      - '.github/workflows/pawnsicon.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawnsicon-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GLYPHFIX_A_URL: https://github.com/SleepSheepQwQ/rimworld-waylith-icon-fix/releases/download/v2.7.0/GlyphFix.zip
+  GLYPHFIX_B_SHA: 691de4815861584c6bb77b0d0fdf2c61fae143ed
+
+jobs:
+  pawnsicon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          dotnet --version
+          gcc --version | head -1
+          uname -srm
+
+      - name: Texture tooling (stb headers for libstb.so, Pillow for the animal art)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+          python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
+      - name: Build the apphost + the pawn-icon probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build pawnsicon/PawnIcon.csproj -c Release -v minimal
+          ls -l pawnsicon/bin/Release/net10.0/PawnIcon.dll
+
+      - name: Assemble the game directory and the 4-direction animal art
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          python3 pawnsicon/make_animal_art.py --resources "$PWD/run/RimWorld_Data/Resources" | tee out/art.txt
+          ls run/RimWorld_Data/Resources/Textures/Things/Pawn/Animal/*/ | head -30
+
+      - name: "A) GlyphFix 2.7.0 release: a texture paired with a CutoutComplexUI material"
+        run: |
+          set -euo pipefail
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          sed 's#<li>ludeon.rimworld.odyssey</li>#<li>ludeon.rimworld.odyssey</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' \
+              ci/ModsConfig.xml > "$CFG/ModsConfig.xml"
+          rm -rf run/Mods/glyphfix
+          mkdir -p run/Mods/glyphfix
+          curl -sSL -o out/glyphfix-a.zip "$GLYPHFIX_A_URL"
+          sha256sum out/glyphfix-a.zip | tee out/glyphfix-a.sha256
+          unzip -qo out/glyphfix-a.zip -d run/Mods/glyphfix
+          ls -R run/Mods/glyphfix
+          grep -o '<modVersion>[^<]*' run/Mods/glyphfix/About/About.xml
+          sha256sum run/Mods/glyphfix/Assemblies/GlyphFix.dll | tee out/glyphfix-a.dll.sha256
+
+          export DOTNET_STARTUP_HOOKS="$PWD/pawnsicon/bin/Release/net10.0/PawnIcon.dll"
+          export PROBE_TIMEOUT_MS=300000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[ANIMALICON\]' "$PWD/../out/a.log" | tee "$PWD/../out/a.txt" || true
+
+      - name: "B) GlyphFix 2.7.1 source: the same texture, material dropped"
+        run: |
+          set -euo pipefail
+          rm -rf iconfix
+          mkdir iconfix
+          cd iconfix
+          git init -q
+          git remote add origin https://github.com/SleepSheepQwQ/rimworld-waylith-icon-fix.git
+          # pin the commit whose build produced the 2.7.1 package; fall back to the branch head
+          if git fetch -q --depth 1 origin "$GLYPHFIX_B_SHA" 2>/dev/null; then
+            git checkout -q FETCH_HEAD
+          else
+            git fetch -q --depth 1 origin rel/2.7.1
+            git checkout -q FETCH_HEAD
+          fi
+          echo "B source sha: $(git rev-parse HEAD)"
+          grep -n "IsUnrenderableUiMaterial" mod/Source/IconFallbackFix.cs | head -4
+          grep -o '<modVersion>[^<]*' mod/About/About.xml
+
+          dotnet build mod/AgentTouchFix.csproj -c Release -v minimal
+          DLL=$(find mod/bin/Release -name 'GlyphFix.dll' | head -1)
+          test -n "$DLL" || { echo "::error::no GlyphFix.dll produced"; exit 1; }
+          sha256sum "$DLL" | tee ../out/glyphfix-b.dll.sha256
+
+          rm -rf ../run/Mods/glyphfix
+          mkdir -p ../run/Mods/glyphfix/Assemblies ../run/Mods/glyphfix/About
+          cp mod/About/About.xml ../run/Mods/glyphfix/About/
+          cp "$DLL" ../run/Mods/glyphfix/Assemblies/
+          ls -R ../run/Mods/glyphfix
+
+          export DOTNET_STARTUP_HOOKS="$PWD/../pawnsicon/bin/Release/net10.0/PawnIcon.dll"
+          export PROBE_TIMEOUT_MS=300000
+          cd "$PWD/../run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[ANIMALICON\]' "$PWD/../out/b.log" | tee "$PWD/../out/b.txt" || true
+
+      - name: Gate
+        run: python3 pawnsicon/gate.py out/a.txt out/b.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### animal icon: A 2.7.0 vs B 2.7.1"
+            echo '```'
+            grep -aE '^\[ANIMALICON\] (species=(Rat|Ibex|Squirrel) step=(def|generate|spawn|bodygraphic|icon|draw)|mod |glyphfix |RESULT|harmony )' out/a.txt out/b.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawnsicon-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: warn
