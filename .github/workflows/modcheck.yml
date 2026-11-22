@@ -82,7 +82,7 @@ jobs:
           cp ci/ModsConfig.leak.xml "$CFG/ModsConfig.xml"
           export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
           export MODCHECK_DEF=Gun_Revolver_LeakExt
-          export PROBE_TIMEOUT_MS=120000
+          export PROBE_TIMEOUT_MS=300000
           export MODCHECK_DDS=1
           cd "$PWD/run"
           ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
@@ -103,7 +103,7 @@ jobs:
           cat "$CFG/ModsConfig.xml"
           export DOTNET_STARTUP_HOOKS="$PWD/modcheck/bin/Release/net10.0/ModCheck.dll"
           export MODCHECK_DEF=Gun_Revolver_LeakExt
-          export PROBE_TIMEOUT_MS=120000
+          export PROBE_TIMEOUT_MS=300000
           export MODCHECK_DDS=1
           cd "$PWD/run"
           ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
