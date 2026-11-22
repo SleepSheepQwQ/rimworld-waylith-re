@@ -103,7 +103,7 @@ namespace MatPool
                  dIl.Any(s => s.Contains("System.IDisposable::Dispose"))
                  && dIl.Any(s => s.Contains("stfld UnityEngine.Object::_destroyed")));
 
-            var texDispose = One(u, "UnityEngine.Texture", "Dispose", "Dispose(System.Boolean)");
+            var texDispose = One(u, "UnityEngine.Texture", "Dispose", "Dispose(Boolean)");
             if (texDispose.IsNil) { Broken.Add("UnityEngine.Texture::Dispose(bool) not found"); return; }
             var tdIl = Steps(u, texDispose);
             Fact("Texture.Dispose(bool) calls the core Waylith texture Dispose and sets _disposed",
@@ -139,21 +139,26 @@ namespace MatPool
                  && !cdIl.Any(s => s.Contains("CpuData")));
 
             // ---------------------------------------------------------------- ST routes
-            var setVec = One(u, "UnityEngine.Material", "SetVector", "SetVector(System.Int32");
-            var setScale = One(u, "UnityEngine.Material", "SetTextureScale", "SetTextureScale(System.Int32");
+            var setVec = One(u, "UnityEngine.Material", "SetVector", "SetVector(Int32");
+            var setScale = One(u, "UnityEngine.Material", "SetTextureScale", "SetTextureScale(Int32");
             var trySt = One(u, "UnityEngine.Material", "TrySetTextureST");
-            if (setVec.IsNil || setScale.IsNil || trySt.IsNil)
-                Broken.Add("Material.SetVector / SetTextureScale / TrySetTextureST missing");
+            var engineTransform = One(w, "Waylith.Rendering.Material", "SetTextureTransform", "SetTextureTransform(Int32");
+            if (setVec.IsNil || setScale.IsNil || trySt.IsNil || engineTransform.IsNil)
+                Broken.Add("Material.SetVector / SetTextureScale / TrySetTextureST / SetTextureTransform missing");
             else
             {
                 var sv = Steps(u, setVec);
                 var ss = Steps(u, setScale);
                 var st = Steps(u, trySt);
+                var et = Steps(w, engineTransform);
                 Fact("Material.SetVector routes _ST names through TrySetTextureST",
                      sv.Any(s => s.Contains("TrySetTextureST")));
-                Fact("Material.SetTextureScale and TrySetTextureST share SetTextureTransform (one _MainTex_ST storage)",
-                     ss.Any(s => s.Contains("SetTextureTransform"))
-                     && st.Any(s => s.Contains("SetTextureTransform")));
+                Fact("Material.SetTextureScale writes the same textureTransforms slot that TrySetTextureST reaches",
+                     ss.Any(s => s.Contains("GetTextureTransform"))
+                     && ss.Any(s => s.Contains("SetTextureSTProperty"))
+                     && st.Any(s => s.Contains("SetTextureTransform"))
+                     && et.Any(s => s.Contains("textureTransforms"))
+                     && et.Any(s => s.Contains("SetTextureSTProperty")));
             }
         }
 
