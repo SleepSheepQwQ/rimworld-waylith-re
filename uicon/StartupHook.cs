@@ -28,10 +28,6 @@ internal static class StartupHook
 {
     private const string T = "[UICON]";
     private static readonly string[] DefNames = { "Ibex", "Squirrel", "Rat", "Boomrat" };
-    private static readonly string[] TexFields =
-    {
-        "CpuData", "levels", "SourcePath", "GpuResource", "isReadable", "filterMode", "anisoLevel",
-    };
 
     private static bool workerHit;
 
@@ -83,8 +79,10 @@ internal static class StartupHook
         try
         {
             Console.WriteLine($"{T} phase=start culture={CultureInfo.CurrentCulture.Name} defs={string.Join(",", DefNames)}");
-            Console.WriteLine($"{T} base badtex={Describe(BaseContent.BadTex)} badgraphic={(BaseContent.BadGraphic == null ? "<null>" : BaseContent.BadGraphic.GetType().Name)}");
-            Console.WriteLine($"{T} base badmat={(BaseContent.BadMat == null ? "<null>" : BaseContent.BadMat.name)}");
+            Console.WriteLine($"{T} base badtex={Describe(BaseContent.BadTex)} badtexIsNull={(BaseContent.BadTex == null)}"
+                              + $" badgraphic={(BaseContent.BadGraphic == null ? "<null>" : BaseContent.BadGraphic.GetType().Name)}"
+                              + $" badmat={(BaseContent.BadMat == null ? "<null>" : BaseContent.BadMat.name)}");
+            DumpMembers("base.BadTex", BaseContent.BadTex, 24);
 
             foreach (string dn in DefNames)
             {
@@ -116,37 +114,35 @@ internal static class StartupHook
         Console.WriteLine($"{T} def={dn} step=def category={def.category} rot={def.defaultPlacingRot}"
                           + $" uiIconPath={(def.uiIconPath.NullOrEmpty() ? "<null>" : def.uiIconPath)}"
                           + $" uiIconScale={Get(def, "uiIconScale")} uiIconAngle={Get(def, "uiIconAngle")}"
-                          + $" uiIconColor={Get(def, "uiIconColor")} graphicData={(def.graphicData == null ? "<null>" : "set")}");
+                          + $" uiIconColor={Col(Get(def, "uiIconColor"))} graphicData={(def.graphicData == null ? "<null>" : "set")}");
 
         // (1) def.graphicData -- what the XML carries on the ThingDef itself.
         GraphicData gd = def.graphicData;
         if (gd == null)
         {
-            Console.WriteLine($"{T} def={dn} step=graphicData <null> (this def has no graphicData; the body art lives on the pawnKind)");
+            Console.WriteLine($"{T} def={dn} step=graphicData value=<null> note=no-graphicData-on-this-def");
         }
         else
         {
             Console.WriteLine($"{T} def={dn} step=graphicData texPath='{gd.texPath}' graphicClass={Typ(gd.graphicClass)}"
                               + $" shaderType={(gd.shaderType == null ? "<null>" : gd.shaderType.defName)}"
                               + $" maskPath={(gd.maskPath.NullOrEmpty() ? "<null>" : gd.maskPath)}"
-                              + $" drawSize={V2(gd.drawSize)} color={gd.color}");
+                              + $" drawSize={V2(gd.drawSize)} color={Col(gd.color)}");
         }
 
         // (1b) The body graphic of the last life stage: for a pawn this is the branch
         // ThingDef.ResolveIcon actually takes (uiIconPath empty -> AnyPawnKind.lifeStages.Last()).
         RaceProperties race = def.race;
         PawnKindDef kind = race?.AnyPawnKind;
-        LifeStageDef stage = null;
-        PawnKindLifeStage kindStage = null;
         GraphicData bgd = null;
-        if (race == null) Console.WriteLine($"{T} def={dn} step=race <null>");
-        else if (kind == null) Console.WriteLine($"{T} def={dn} step=race pawnKind=<null>");
-        else if (kind.lifeStages == null || kind.lifeStages.Count == 0) Console.WriteLine($"{T} def={dn} step=bodySource lifeStages=0");
+        if (race == null) Console.WriteLine($"{T} def={dn} step=bodySource value=<null> note=no-race");
+        else if (kind == null) Console.WriteLine($"{T} def={dn} step=bodySource value=<null> note=no-anyPawnKind");
+        else if (kind.lifeStages == null || kind.lifeStages.Count == 0) Console.WriteLine($"{T} def={dn} step=bodySource value=<null> note=no-lifeStages");
         else
         {
-            kindStage = kind.lifeStages[kind.lifeStages.Count - 1];
+            PawnKindLifeStage kindStage = kind.lifeStages[kind.lifeStages.Count - 1];
             bgd = kindStage.bodyGraphicData;
-            stage = race.lifeStageAges != null && race.lifeStageAges.Count > 0
+            LifeStageDef stage = race.lifeStageAges != null && race.lifeStageAges.Count > 0
                 ? race.lifeStageAges[race.lifeStageAges.Count - 1].def
                 : null;
             Console.WriteLine($"{T} def={dn} step=bodySource pawnKind={kind.defName} lifeStages={kind.lifeStages.Count}"
@@ -154,28 +150,28 @@ internal static class StartupHook
                               + $" graphicClass={(bgd == null ? "<null>" : Typ(bgd.graphicClass))}"
                               + $" shaderType={(bgd?.shaderType == null ? "<null>" : bgd.shaderType.defName)}"
                               + $" maskPath={(bgd == null || bgd.maskPath.NullOrEmpty() ? "<null>" : bgd.maskPath)}"
-                              + $" drawSize={(bgd == null ? "-" : V2(bgd.drawSize))} color={(bgd == null ? "-" : bgd.color.ToString())}");
+                              + $" drawSize={(bgd == null ? "-" : V2(bgd.drawSize))} color={(bgd == null ? "-" : Col(bgd.color))}");
         }
 
         // (4) def.graphic: type, inner graphic, material for defaultPlacingRot.
         Graphic g = def.graphic;
         Console.WriteLine($"{T} def={dn} step=def.graphic value={(g == null ? "<null>" : g.GetType().FullName)}"
                           + $" path='{(g == null ? "-" : g.path)}' isBadGraphic={(g != null && g == BaseContent.BadGraphic)}");
-        if (g != null) ReportGraphic($"{dn}.def", g, def.defaultPlacingRot);
+        if (g != null) ReportGraphic(dn, "defgraphic", g, def.defaultPlacingRot);
 
         // (4b) The same three steps on the graphic the pawn icon really comes from.
         Graphic bg = null;
         if (bgd != null)
         {
             try { bg = bgd.Graphic; }
-            catch (Exception e) { Console.WriteLine($"{T} def={dn} step=body.graphic !{e.GetType().Name}: {OneLine(e.Message)}"); }
+            catch (Exception e) { Console.WriteLine($"{T} def={dn} step=bodygraphic !{e.GetType().Name}: {OneLine(e.Message)}"); }
         }
         Console.WriteLine($"{T} def={dn} step=body.graphic value={(bg == null ? "<null>" : bg.GetType().FullName)}"
                           + $" path='{(bg == null ? "-" : bg.path)}' isBadGraphic={(bg != null && bg == BaseContent.BadGraphic)}");
         Material bodyMat = null;
         if (bg != null)
         {
-            ReportGraphic($"{dn}.body", bg, Rot4.East);
+            ReportGraphic(dn, "bodygraphic", bg, Rot4.East);
             try { bodyMat = bg.ExtractInnerGraphicFor(null).MatAt(Rot4.East); }
             catch (Exception e) { Console.WriteLine($"{T} def={dn} step=body.mat !{e.GetType().Name}: {OneLine(e.Message)}"); }
         }
@@ -185,12 +181,19 @@ internal static class StartupHook
         bool uiNull = ui == null;
         bool uiBad = ui != null && ReferenceEquals(ui, BaseContent.BadTex);
         Console.WriteLine($"{T} def={dn} step=uiIcon null={uiNull} badTex={uiBad} value={Describe(ui)}");
-        if (ui != null) ReportTexture($"{dn}.uiIcon", ui);
+        if (ui != null) ReportTexture(dn, "uiIcon", ui);
 
         // (3) def.uiIconMaterial.
         Material uim = def.uiIconMaterial;
-        Console.WriteLine($"{T} def={dn} step=uiIconMaterial null={(uim == null)}");
-        if (uim != null) ReportMaterial($"{dn}.uiIconMaterial", uim);
+        if (uim == null)
+        {
+            Console.WriteLine($"{T} def={dn} step=uiIconMaterial null=True");
+        }
+        else
+        {
+            Console.WriteLine($"{T} def={dn} step=uiIconMaterial null=False {MatFields(uim)}");
+            DumpMembers(dn + "/uiIconMaterial.shader", uim.shader, 24);
+        }
 
         // The exact decision point inside ResolveIcon, replayed on the body material.
         if (bodyMat != null)
@@ -226,7 +229,7 @@ internal static class StartupHook
         // decompiled branch evaluates, then by calling the engine function itself.
         bool early = uiNull || uiBad;
         Console.WriteLine($"{T} def={dn} step=thingicon.def earlyReturn={early} nullBranch={uiNull} badTexBranch={uiBad}"
-                          + $" (uiIcon==null || uiIcon==BaseContent.BadTex)");
+                          + $" expr=uiIcon==null||uiIcon==BaseContent.BadTex");
         Material gotMat = null;
         try
         {
@@ -239,7 +242,7 @@ internal static class StartupHook
         // The path the wildlife tab actually draws (PawnColumnWorker_Label -> ThingIcon(Rect, Thing)).
         Texture2D instIcon = bodyMat?.mainTexture as Texture2D;
         bool instEarly = instIcon == null || ReferenceEquals(instIcon, BaseContent.BadTex);
-        Console.WriteLine($"{T} def={dn} step=thingicon.instance(BodyGraphic) icon={Describe(instIcon)}"
+        Console.WriteLine($"{T} def={dn} step=thingicon.instance icon={Describe(instIcon)}"
                           + $" earlyReturn={instEarly} material={(bodyMat == null ? "<null>" : bodyMat.name)}");
 
         if (Environment.GetEnvironmentVariable("UICON_CALL") == "1")
@@ -254,27 +257,25 @@ internal static class StartupHook
             catch (Exception e)
             {
                 Console.WriteLine($"{T} def={dn} step=thingicon.call threw {e.GetType().Name}: {OneLine(e.Message)}"
-                                  + $" workerReached={workerHit}");
+                                  + $" workerReached={workerHit} at={Where(e)}");
             }
         }
     }
 
-    private static void ReportGraphic(string tag, Graphic g, Rot4 rot)
+    private static void ReportGraphic(string dn, string tag, Graphic g, Rot4 rot)
     {
         Graphic inner = null;
         string err = "";
         try { inner = g.ExtractInnerGraphicFor(null); }
-        catch (Exception e) { err = $" !{e.GetType().Name}: {OneLine(e.Message)}"; }
-        Console.WriteLine($"{T} {tag} step=inner type={(inner == null ? "<null>" : inner.GetType().Name)}"
+        catch (Exception e) { err = $" error={e.GetType().Name}:{OneLine(e.Message)}"; }
+        Console.WriteLine($"{T} def={dn} step={tag}.inner type={(inner == null ? "<null>" : inner.GetType().Name)}"
                           + $" path='{(inner == null ? "-" : inner.path)}'{err}");
 
         Material m = null;
         err = "";
         try { m = inner?.MatAt(rot); }
-        catch (Exception e) { err = $" !{e.GetType().Name}: {OneLine(e.Message)}"; }
-        Console.WriteLine($"{T} {tag} step=mat rot={rot}");
-        ReportMaterial($"{tag}.mat", m);
-        if (err.Length > 0) Console.WriteLine($"{T} {tag} step=mat error{err}");
+        catch (Exception e) { err = $" error={e.GetType().Name}:{OneLine(e.Message)}"; }
+        Console.WriteLine($"{T} def={dn} step={tag}.mat rot={rot} {(m == null ? "value=<null>" : MatFields(m))}{err}");
 
         // Direction table for a Graphic_Multi: which suffixes resolved, which fell back.
         FieldInfo matsField = g.GetType().GetField("mats", BindingFlags.Public | BindingFlags.Instance);
@@ -287,73 +288,45 @@ internal static class StartupHook
                 sb.Append($" [{i}]={(mm == null ? "<null>" : (mm.mainTexture == null ? "<null-tex>" : mm.mainTexture.name))}"
                           + $"/{((mm?.shader) == null ? "<null>" : mm.shader.name)}");
             }
-            Console.WriteLine($"{T} {tag} step=mats{sb}");
-            string fallen = Get(g, "drawRotatedExtraAngleOffset").ToString();
-            Console.WriteLine($"{T} {tag} step=matsFlags drawRotatedExtraAngleOffset={fallen}"
+            Console.WriteLine($"{T} def={dn} step={tag}.mats{sb}");
+            Console.WriteLine($"{T} def={dn} step={tag}.matsFlags"
+                              + $" drawRotatedExtraAngleOffset={Get(g, "drawRotatedExtraAngleOffset")}"
                               + $" eastFlipped={Get(g, "eastFlipped")} westFlipped={Get(g, "westFlipped")}");
         }
     }
 
-    private static void ReportMaterial(string tag, Material m)
+    /// <summary>name/shader/mainTexture/mask/queue on one line, no spaces inside a value.</summary>
+    private static string MatFields(Material m)
     {
-        if (m == null)
-        {
-            Console.WriteLine($"{T} {tag} step=material <null>");
-            return;
-        }
-        string shader = "-", main = "-", mask = "-", color = "-", name = "-";
-        try { name = m.name; } catch (Exception e) { name = "!" + e.GetType().Name; }
-        try { shader = m.shader == null ? "<null>" : m.shader.name; } catch (Exception e) { shader = "!" + e.GetType().Name; }
-        try { main = m.mainTexture == null ? "<null>" : $"{m.mainTexture.name}({m.mainTexture.width}x{m.mainTexture.height})"; }
-        catch (Exception e) { main = "!" + e.GetType().Name; }
-        try
+        string name = Safe(() => m.name);
+        string shader = Safe(() => m.shader == null ? "<null>" : m.shader.name);
+        string shaderType = Safe(() => m.shader == null ? "<null>" : m.shader.GetType().FullName);
+        string main = Safe(() => m.mainTexture == null ? "<null>" : $"{m.mainTexture.name}({m.mainTexture.width}x{m.mainTexture.height})");
+        string mask = Safe(() =>
         {
             Texture mt = m.GetTexture(ShaderPropertyIDs.MaskTex);
-            mask = mt == null ? "<null>" : mt.name;
-        }
-        catch (Exception e) { mask = "!" + e.GetType().Name; }
-        try { color = m.color.ToString(); } catch (Exception e) { color = "!" + e.GetType().Name; }
-        Console.WriteLine($"{T} {tag} step=material name='{name}' shader='{shader}' main='{main}' mask='{mask}' color={color}");
-        bool supportsMask = false;
-        try { supportsMask = m.shader != null && m.shader.SupportsMaskTex(); } catch { }
-        Console.WriteLine($"{T} {tag} step=material.shader supportsMaskTex={supportsMask} renderQueue={SafeQueue(m)}");
+            return mt == null ? "<null>" : mt.name;
+        });
+        string color = Safe(() => Col(m.color));
+        string queue = Safe(() => m.renderQueue.ToString());
+        string maskSupport = Safe(() => (m.shader != null && m.shader.SupportsMaskTex()).ToString());
+        return $"name='{name}' shader='{shader}' shaderType={shaderType} main='{main}' mask='{mask}'"
+               + $" color={color} queue={queue} maskTexSupport={maskSupport}";
     }
 
-    private static string SafeQueue(Material m)
+    private static void ReportTexture(string dn, string tag, Texture2D t)
     {
-        try { return m.renderQueue.ToString(); } catch { return "?"; }
-    }
-
-    private static void ReportTexture(string tag, Texture2D t)
-    {
-        Console.WriteLine($"{T} {tag} step=texture name='{t.name}' size={t.width}x{t.height}"
-                          + $" format={t.format} mips={t.mipmapCount} badTexRef={ReferenceEquals(t, BaseContent.BadTex)}");
-        var sb = new StringBuilder();
-        Type type = t.GetType();
-        foreach (string f in TexFields)
-        {
-            object v = "-";
-            try
-            {
-                PropertyInfo p = type.GetProperty(f, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (p != null) v = p.GetValue(t);
-                else
-                {
-                    FieldInfo fi = type.GetField(f, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (fi != null) v = fi.GetValue(t);
-                }
-            }
-            catch (Exception e) { v = "!" + e.GetType().Name; }
-            sb.Append($" {f}={(v == null ? "null" : Short(v))}");
-        }
-        Console.WriteLine($"{T} {tag} step=texture.fields type={type.FullName}{sb}");
+        Console.WriteLine($"{T} def={dn} step={tag}.texture name='{t.name}' size={t.width}x{t.height}"
+                          + $" format={t.format} mips={t.mipmapCount} badTexRef={ReferenceEquals(t, BaseContent.BadTex)}"
+                          + $" type={t.GetType().FullName} assembly={t.GetType().Assembly.GetName().Name}");
+        DumpMembers(dn + "/" + tag, t, 40);
 
         try
         {
             Color32[] px = t.GetPixels32();
             if (px == null || px.Length == 0)
             {
-                Console.WriteLine($"{T} {tag} step=texture.pixels EMPTY length={(px == null ? -1 : 0)}");
+                Console.WriteLine($"{T} def={dn} step={tag}.pixels EMPTY length={(px == null ? -1 : 0)}");
             }
             else
             {
@@ -369,14 +342,61 @@ internal static class StartupHook
                 int n = px.Length;
                 double mean = l / n;
                 double sd = Math.Sqrt(Math.Max(0, l2 / n - mean * mean));
-                Console.WriteLine($"{T} {tag} step=texture.pixels n={n} meanRGB=({r / n:F1},{g2 / n:F1},{b / n:F1})"
+                Console.WriteLine($"{T} def={dn} step={tag}.pixels n={n} meanRGB=({r / n:F1},{g2 / n:F1},{b / n:F1})"
                                   + $" meanA={a / n:F1} alpha0={zero}/{n} lumSd={sd:F2}");
             }
         }
         catch (Exception e)
         {
-            Console.WriteLine($"{T} {tag} step=texture.pixels !{e.GetType().Name}: {OneLine(e.Message)}");
+            Console.WriteLine($"{T} def={dn} step={tag}.pixels !{e.GetType().Name}: {OneLine(e.Message)}");
         }
+    }
+
+    /// <summary>
+    /// Every field and every property that returns a primitive/string, so the shim's real state
+    /// members show up (the port's Texture2D may not have UnityEngine's CpuData/levels names).
+    /// </summary>
+    private static void DumpMembers(string tag, object o, int max)
+    {
+        if (o == null)
+        {
+            Console.WriteLine($"{T} members {tag} value=<null>");
+            return;
+        }
+        Type t = o.GetType();
+        var parts = new List<string>();
+        foreach (FieldInfo f in t.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+        {
+            if (parts.Count >= max) break;
+            object v;
+            try { v = f.GetValue(o); } catch (Exception e) { v = "!" + e.GetType().Name; }
+            parts.Add($"{f.Name}={Short(v)}");
+        }
+        foreach (PropertyInfo p in t.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+        {
+            if (parts.Count >= max) break;
+            if (p.GetIndexParameters().Length > 0) continue;
+            object v;
+            try { v = p.GetValue(o); }
+            catch (Exception e) { v = "!" + e.GetType().Name; continue; }
+            if (v == null || v.GetType().IsPrimitive || v is string || v is decimal || v.GetType().IsEnum)
+            {
+                parts.Add($"{p.Name}={Short(v)}");
+            }
+        }
+        Console.WriteLine($"{T} members {tag} type={t.FullName} {string.Join(" ", parts)}");
+    }
+
+    private static string Safe(Func<string> f)
+    {
+        try { return f(); } catch (Exception e) { return "!" + e.GetType().Name; }
+    }
+
+    private static string Where(Exception e)
+    {
+        string st = e.StackTrace ?? "";
+        string[] frames = st.Split('\n');
+        return string.Join("|", frames.Take(3).Select(s => s.Trim().Replace(' ', '_'))).Replace("\r", "");
     }
 
     private static object Get(object o, string member)
@@ -401,11 +421,17 @@ internal static class StartupHook
         catch { return $"'{t.name}'(?)"; }
     }
 
+    private static string Col(object v)
+    {
+        if (v is Color c) return $"{c.r:F2}/{c.g:F2}/{c.b:F2}/{c.a:F2}";
+        return Short(v);
+    }
+
     private static string Short(object v)
     {
         if (v == null) return "null";
-        if (v is string s) return s.Length == 0 ? "''" : s;
-        if (v is bool b) return b ? "true" : "false";
+        if (v is string s) return s.Length == 0 ? "''" : s.Replace(' ', '_');
+        if (v is bool b) return b ? "True" : "False";
         if (v.GetType().IsPrimitive || v is decimal) return Convert.ToString(v, CultureInfo.InvariantCulture);
         if (v is Array arr) return $"{v.GetType().Name}[{arr.Length}]";
         Type t = v.GetType();
@@ -420,5 +446,5 @@ internal static class StartupHook
 
     private static string Typ(Type t) => t == null ? "<null>" : t.Name;
     private static string V2(Vector2 v) => $"{v.x:F2}x{v.y:F2}";
-    private static string OneLine(string s) => (s ?? "").Replace('\n', ' ').Replace('\r', ' ');
+    private static string OneLine(string s) => (s ?? "").Replace('\n', ' ').Replace('\r', ' ').Replace(' ', '_');
 }
