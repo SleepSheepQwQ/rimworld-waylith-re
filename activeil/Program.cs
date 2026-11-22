@@ -21,11 +21,11 @@ internal static class Program
 
     private sealed class Site
     {
-        public string Asm, Method, Callee;
+        public string Asm, Method, Callee, Sig;
         public int Offset;
         public bool NullArg;
         public override string ToString() =>
-            $"{Method}  ->  {Callee}  (IL_{Offset:x4}{(NullArg ? ", null" : "")})";
+            $"{Method}  {Sig}  ->  {Callee}  (IL_{Offset:x4}{(NullArg ? ", null" : "")})";
     }
 
     private static void Main(string[] args)
@@ -70,11 +70,11 @@ internal static class Program
                     if (mr.Name == "set_active" && dt == "RenderTexture")
                     {
                         bool nul = ins.Previous != null && ins.Previous.OpCode == OpCodes.Ldnull;
-                        writes.Add(new Site { Asm = name, Method = full, Callee = "RenderTexture.set_active", Offset = ins.Offset, NullArg = nul });
+                        writes.Add(new Site { Asm = name, Method = full, Callee = "RenderTexture.set_active", Offset = ins.Offset, NullArg = nul, Sig = SigOf(m) });
                     }
                     if (dt == "Graphics" && (mr.Name == "Blit" || mr.Name == "SetRenderTarget" || mr.Name == "CopyTexture"))
                     {
-                        callers.Add(new Site { Asm = name, Method = full, Callee = mr.Name + "(" + string.Join(",", mr.Parameters.Select(p => p.ParameterType.Name)) + ")", Offset = ins.Offset });
+                        callers.Add(new Site { Asm = name, Method = full, Callee = mr.Name + "(" + string.Join(",", mr.Parameters.Select(p => p.ParameterType.Name)) + ")", Offset = ins.Offset, Sig = SigOf(m) });
                     }
                 }
             }
@@ -132,6 +132,9 @@ internal static class Program
             }
         }
     }
+
+    private static string SigOf(MethodDefinition m) =>
+        m.Name + "(" + string.Join(",", m.Parameters.Select(p => p.ParameterType.Name)) + ")";
 
     private static IEnumerable<TypeDefinition> AllTypes(ModuleDefinition m)
     {
