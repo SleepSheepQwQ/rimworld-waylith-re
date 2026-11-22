@@ -106,7 +106,8 @@ jobs:
           set -euo pipefail
           export DOTNET_STARTUP_HOOKS="$PWD/animalprobe/bin/Release/net10.0/AnimalProbe.dll"
           export ANIMAL_DEFS="Ibex,Boomalope,Squirrel,Cow"
-          export PROBE_TIMEOUT_MS=180000
+          export ANIMAL_MAP="1"
+          export PROBE_TIMEOUT_MS=420000
           cd "$PWD/run"
           ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/animal.log" 2>&1 || echo "exit=$?"
           grep -aE '^\[ANIMAL\]' "$PWD/../out/animal.log" | tee "$PWD/../out/animal.txt" || true
@@ -130,6 +131,11 @@ jobs:
                             txt, re.S | re.M)
               return m.group(1) if m else ""
 
+          def live_block(name):
+              m = re.search(r"^\[ANIMAL\] ==== live %s ====\n(.*?)(?=^\[ANIMAL\] ==== live |^\[ANIMAL\] RESULT=)" % re.escape(name),
+                            txt, re.S | re.M)
+              return m.group(1) if m else ""
+
           if "[ANIMAL] RESULT=DONE" not in txt:
               fail("probe did not finish (RESULT=DONE missing)")
 
@@ -148,8 +154,17 @@ jobs:
               need(b, name, r"def\.uiIconMaterial\.imguidraw passMaterial=ok program=ok path=material", "ImGui would take the material path for def.uiIconMaterial")
               need(b, name, r"body\.east\.name=.*shader='CutoutComplex'", "body material shader is CutoutComplex")
               need(b, name, r"body\.east\.mainTexture '[^']+' 128x128", "body material has a real texture")
-              need(b, name, r"geticonfor\.thing material='CutoutComplexUI_", "GetIconFor(Thing) builds a CutoutComplexUI material")
+              need(b, name, r"geticonfor\.thing .*material='CutoutComplexUI_", "GetIconFor(Thing) builds a CutoutComplexUI material")
               need(b, name, r"simulate\.dropDefMaterial defOverload\.material=''.*thingOverload\.material='CutoutComplexUI_", "dropping def.uiIconMaterial fixes only the Def overload")
+              live_complex(name)
+
+          def live_complex(name):
+              b = live_block(name)
+              if not b:
+                  fail("%s: no live block" % name); return
+              need(b, name, r"live\.pawn def=.* spawned=True", "a spawned %s pawn on the game's map" % name)
+              need(b, name, r"live2\.bodyGraphic\.east material='CutoutComplex_[^']*' shader='CutoutComplex' tex='[^']+' 128x128", "the live BodyGraphic material")
+              need(b, name, r"live2\.geticonfor\.thing tex='[^']+' 128x128 material='CutoutComplexUI_[^']*' shader='CutoutComplexUI'", "the live GetIconFor(Thing) material")
 
           def drawable_control(name):
               b = block(name)
@@ -157,8 +172,13 @@ jobs:
                   fail("%s: no block" % name); return
               need(b, name, r"body\.east\.name=.*shader='Cutout'", "body material shader is plain Cutout")
               need(b, name, r"body\.east\.mainTexture '[^']+' 128x128", "body material has a real texture")
-              need(b, name, r"geticonfor\.thing material='' shader=''", "GetIconFor(Thing) leaves material null on Cutout")
+              need(b, name, r"geticonfor\.thing .*material='' shader=''", "GetIconFor(Thing) leaves material null on Cutout")
               need(b, name, r"control\.cutout .* uiMap=False .*wouldBuild=null\(plain-texture path\)", "plain Cutout has no UI shader, i.e. the texture path")
+              lb = live_block(name)
+              if not lb:
+                  fail("%s: no live block" % name); return
+              need(lb, name, r"live\.pawn def=.* spawned=True", "a spawned %s pawn on the game's map" % name)
+              need(lb, name, r"live2\.geticonfor\.thing tex='[^']+' 128x128 material='' shader=''", "the live GetIconFor(Thing) on the plain-texture path")
 
           complex_def("Ibex")
           complex_def("Boomalope")

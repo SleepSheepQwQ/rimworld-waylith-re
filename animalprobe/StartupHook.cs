@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using RimWorld;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Verse;
 using WR = Waylith.Rendering;
 
@@ -24,6 +25,9 @@ internal static class StartupHook
 {
     private const string T = "[ANIMAL]";
     private static int _done;
+    private static int _phase2;
+    private static readonly List<string> Defs = new List<string>();
+    private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
 
     public static void Initialize()
     {
@@ -55,9 +59,23 @@ internal static class StartupHook
             foreach (string raw in list.Split(','))
             {
                 string name = raw.Trim();
-                if (name.Length != 0) Probe(name);
+                if (name.Length == 0) continue;
+                Defs.Add(name);
+                Probe(name);
             }
-            Console.WriteLine($"{T} RESULT=DONE");
+
+            if (Environment.GetEnvironmentVariable("ANIMAL_MAP") == "1")
+            {
+                // The live animal tab needs a spawned pawn, which needs a map. Use the game's own
+                // Play scene (Root_Play.Start runs the quick-test new game), then come back on a
+                // background thread so the main-thread map generation can run.
+                Log("map=requesting scene Play");
+                SceneManager.LoadScene("Play");
+                new Thread(WaitForMap) { IsBackground = true, Name = "animalprobe-map-waiter" }.Start();
+                return;
+            }
+
+            Log("RESULT=DONE");
             Console.Out.Flush();
             Environment.Exit(0);
         }
@@ -203,6 +221,111 @@ internal static class StartupHook
             Log($"{tag}={(v == null ? "null" : v.ToString())}");
         }
         catch (Exception e) { Log($"{tag}.threw {e.GetType().Name}: {e.Message}"); }
+    }
+
+    // ------------------------------------------------------------------ live phase on the game's own map
+    private static void WaitForMap()
+    {
+        while (Clock.Elapsed.TotalSeconds < 320)
+        {
+            Map map = null;
+            try { map = Current.Game?.CurrentMap; } catch { }
+            if (map == null)
+            {
+                try { map = Find.AnyPlayerHomeMap; } catch { }
+            }
+            if (map != null)
+            {
+                Log($"map=published size={map.Size.x}x{map.Size.z} things={map.listerThings.AllThings.Count}");
+                LongEventHandler.QueueLongEvent(() => Phase2(map), null, doAsynchronously: false, null);
+                return;
+            }
+            Thread.Sleep(100);
+        }
+        Log("map=FAILED timeout");
+        Log("RESULT=DONE");
+        Console.Out.Flush();
+        Environment.Exit(0);
+    }
+
+    private static void Phase2(Map map)
+    {
+        if (Interlocked.Exchange(ref _phase2, 1) != 0) return;
+        try
+        {
+            // Same map-mesh workaround as ci/scenario: a failed deferred RegenerateEverythingNow
+            // leaves a half-built sections array, and Thing.SpawnSetup's DirtyMapMesh would
+            // dereference it. Nothing in the icon path reads the mesh.
+            try
+            {
+                MapDrawer drawer = map.mapDrawer;
+                if (drawer != null && drawer.sections != null)
+                {
+                    bool complete = true;
+                    for (int i = 0; i < drawer.SectionCount.x && complete; i++)
+                        for (int j = 0; j < drawer.SectionCount.z; j++)
+                            if (drawer.sections[i, j] == null) { complete = false; break; }
+                    if (!complete) { drawer.sections = null; Log("mapMesh=incomplete->null"); }
+                    else Log("mapMesh=complete");
+                }
+            }
+            catch (Exception e) { Log($"mapMesh.probe {e.GetType().Name}: {e.Message}"); }
+
+            foreach (string name in Defs)
+            {
+                Log($"==== live {name} ====");
+                ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(name);
+                PawnKindDef kind = def?.race?.AnyPawnKind;
+                if (kind == null) { Log($"live.def={name} missing"); continue; }
+
+                Pawn pawn = null;
+                try { pawn = PawnGenerator.GeneratePawn(kind, (Faction)null); }
+                catch (Exception e) { Log($"live.pawn.generate.threw {e.GetType().Name}: {e.Message}"); }
+                if (pawn == null) continue;
+
+                IntVec3 cell;
+                if (!CellFinder.TryFindRandomCellNear(map.Center, map, 30, c => c.Standable(map), out cell)) cell = map.Center;
+                try
+                {
+                    GenSpawn.Spawn(pawn, cell, map, WipeMode.Vanish);
+                    Log($"live.pawn def={pawn.def.defName} gender={pawn.gender} spawned={pawn.Spawned} cell={cell}");
+                }
+                catch (Exception e) { Log($"live.spawn.threw {e.GetType().Name}: {e.Message}"); continue; }
+
+                Step("live2.bodyGraphic", () => pawn.Drawer.renderer.BodyGraphic);
+                Step("live2.ensureGraphics", () => { pawn.Drawer.renderer.EnsureGraphicsInitialized(); return "ok"; });
+                Step("live2.bodyGraphic.east", () =>
+                {
+                    Graphic bg = pawn.Drawer.renderer.BodyGraphic;
+                    if (bg == null) return null;
+                    Material bm = bg.MatAt(Rot4.East);
+                    return $"material='{bm?.name}' shader='{bm?.shader?.name}' tex={TexInfo(bm?.mainTexture as Texture2D)}";
+                });
+
+                try
+                {
+                    float scale = 0f, angle = 0f;
+                    Vector2 prop = Vector2.one;
+                    Color col = Color.white;
+                    Material mat = null;
+                    Texture icon = Widgets.GetIconFor(pawn, new Vector2(128f, 128f), Rot4.East, false,
+                                                      out scale, out angle, out prop, out col, out mat);
+                    Log($"live2.geticonfor.thing tex={TexInfo(icon as Texture2D)} material='{mat?.name}' shader='{mat?.shader?.name}'");
+                    Diag("live2.geticonfor.thing.material", mat);
+                }
+                catch (Exception e) { Log($"live2.geticonfor.thing.threw {e.GetType().Name}: {e.Message}"); }
+            }
+
+            Log("RESULT=DONE");
+            Console.Out.Flush();
+            Environment.Exit(0);
+        }
+        catch (Exception e)
+        {
+            Log($"RESULT=FATAL phase2 {e.GetType().Name}: {e.Message}");
+            Console.Out.Flush();
+            Environment.Exit(8);
+        }
     }
 
     // ------------------------------------------------------------------ the exact UI-material construction
