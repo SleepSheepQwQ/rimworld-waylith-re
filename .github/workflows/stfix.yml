@@ -1,0 +1,189 @@
+name: stfix
+
+# GlyphFix 2.7.0 vs 2.7.1 vs 2.7.2 on the animal-list icon, measured on a real spawned pawn:
+#
+#   A 2.7.0  release zip      texture + CutoutComplexUI_* material; bundle order ST = (1,1,0,0)
+#   B 2.7.1  rel/2.7.1        the same texture, material = null (the blunt fix)
+#   C 2.7.2  rel/2.7.2        material kept, _MainTex_ST written back as (0,0,1,1); if the
+#                             material has no SetVector(string,Vector4), the mod must drop the
+#                             material instead - and the gate then refuses to call it green.
+#
+# probe output per species (Rat, Ibex; Squirrel is the plain-Cutout control):
+#   texture name/size, material null?, material.name, shader, and _MainTex_ST read back four ways
+#   (GetVector(reflection), engine TryGetVector, the bound source-shader uniform, and the bound
+#   bundle-shader uniform that the device actually draws).
+#
+# Then the real CutoutComplexUI.frag.glsl runs in vk/harness (lavapipe) with C's own ST:
+# identity must draw ~15660/16384 pixels, the engine order (1,1,0,0) must draw 0.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'pawnsicon/**'
+      - '.github/workflows/stfix.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stfix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GLYPHFIX_A_URL: https://github.com/SleepSheepQwQ/rimworld-waylith-icon-fix/releases/download/v2.7.0/GlyphFix.zip
+  GLYPHFIX_B_SHA: 691de4815861584c6bb77b0d0fdf2c61fae143ed
+  GLYPHFIX_C_SHA: 7482ceca3643c41a14829a2a114aea425232f6cc
+  GLYPHFIX_REPO: https://github.com/SleepSheepQwQ/rimworld-waylith-icon-fix.git
+
+jobs:
+  stfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev libvulkan-dev mesa-vulkan-drivers glslang-tools build-essential
+          python3 -m pip install --break-system-packages --quiet pillow
+          dotnet --version
+          glslangValidator --version | head -1
+
+      - name: Build the apphost + the pawn-icon probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build pawnsicon/PawnIcon.csproj -c Release -v minimal
+          ls -l pawnsicon/bin/Release/net10.0/PawnIcon.dll
+
+      - name: Assemble the game directory and the animal art
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          python3 pawnsicon/make_animal_art.py --resources "$PWD/run/RimWorld_Data/Resources" | tee out/art.txt
+
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          mkdir -p "$CFG"
+          sed 's#<li>ludeon.rimworld.odyssey</li>#<li>ludeon.rimworld.odyssey</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' \
+              ci/ModsConfig.xml > "$CFG/ModsConfig.xml"
+          grep -n glyphfix "$CFG/ModsConfig.xml"
+
+      - name: "A) GlyphFix 2.7.0 release"
+        run: |
+          set -euo pipefail
+          rm -rf run/Mods/glyphfix && mkdir -p run/Mods/glyphfix
+          curl -sSL -o out/glyphfix-a.zip "$GLYPHFIX_A_URL"
+          sha256sum out/glyphfix-a.zip | tee out/glyphfix-a.sha256
+          unzip -qo out/glyphfix-a.zip -d run/Mods/glyphfix
+          grep -o '<modVersion>[^<]*' run/Mods/glyphfix/About/About.xml
+          sha256sum run/Mods/glyphfix/Assemblies/GlyphFix.dll | tee out/glyphfix-a.dll.sha256
+
+          export DOTNET_STARTUP_HOOKS="$PWD/pawnsicon/bin/Release/net10.0/PawnIcon.dll"
+          export PROBE_TIMEOUT_MS=300000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/a.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[ANIMALICON\]' "$PWD/../out/a.log" | tee "$PWD/../out/a.txt" || true
+
+      - name: "B) GlyphFix 2.7.1 source"
+        run: |
+          set -euo pipefail
+          bash -c '
+            set -euo pipefail
+            rm -rf iconfix-b && mkdir iconfix-b && cd iconfix-b
+            git init -q
+            git remote add origin "$GLYPHFIX_REPO"
+            if ! git fetch -q --depth 1 origin "$GLYPHFIX_B_SHA" 2>/dev/null; then
+              git fetch -q --depth 1 origin rel/2.7.1
+            fi
+            git checkout -q FETCH_HEAD
+            echo "B source sha: $(git rev-parse HEAD)"
+            grep -o "<modVersion>[^<]*" mod/About/About.xml
+            dotnet build mod/AgentTouchFix.csproj -c Release -v minimal
+            DLL=$(find mod/bin/Release -name GlyphFix.dll | head -1)
+            test -n "$DLL"
+            sha256sum "$DLL" | tee ../out/glyphfix-b.dll.sha256
+            rm -rf ../run/Mods/glyphfix
+            mkdir -p ../run/Mods/glyphfix/Assemblies ../run/Mods/glyphfix/About
+            cp mod/About/About.xml ../run/Mods/glyphfix/About/
+            cp "$DLL" ../run/Mods/glyphfix/Assemblies/
+          '
+          export DOTNET_STARTUP_HOOKS="$PWD/pawnsicon/bin/Release/net10.0/PawnIcon.dll"
+          export PROBE_TIMEOUT_MS=300000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/b.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[ANIMALICON\]' "$PWD/../out/b.log" | tee "$PWD/../out/b.txt" || true
+
+      - name: "C) GlyphFix 2.7.2 source"
+        run: |
+          set -euo pipefail
+          bash -c '
+            set -euo pipefail
+            rm -rf iconfix-c && mkdir iconfix-c && cd iconfix-c
+            git init -q
+            git remote add origin "$GLYPHFIX_REPO"
+            if ! git fetch -q --depth 1 origin "$GLYPHFIX_C_SHA" 2>/dev/null; then
+              git fetch -q --depth 1 origin rel/2.7.2
+            fi
+            git checkout -q FETCH_HEAD
+            echo "C source sha: $(git rev-parse HEAD)"
+            grep -o "<modVersion>[^<]*" mod/About/About.xml
+            grep -n "TryNormalizeUiMaterial" mod/Source/IconFallbackFix.cs | head -3
+            dotnet build mod/AgentTouchFix.csproj -c Release -v minimal
+            DLL=$(find mod/bin/Release -name GlyphFix.dll | head -1)
+            test -n "$DLL"
+            sha256sum "$DLL" | tee ../out/glyphfix-c.dll.sha256
+            rm -rf ../run/Mods/glyphfix
+            mkdir -p ../run/Mods/glyphfix/Assemblies ../run/Mods/glyphfix/About
+            cp mod/About/About.xml ../run/Mods/glyphfix/About/
+            cp "$DLL" ../run/Mods/glyphfix/Assemblies/
+          '
+          export DOTNET_STARTUP_HOOKS="$PWD/pawnsicon/bin/Release/net10.0/PawnIcon.dll"
+          export PROBE_TIMEOUT_MS=300000
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/c.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[ANIMALICON\]' "$PWD/../out/c.log" | tee "$PWD/../out/c.txt" || true
+
+      - name: Pixel test - C's own _MainTex_ST through the real UI shader
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          glslangValidator -V vk/quad.vert -o build/quad.spv
+          glslangValidator -V pipe/shaders/CutoutComplexUI.frag.glsl -o build/ui.spv
+          gcc -O2 -std=c11 -Wall -o build/harness vk/harness.c -lvulkan -lm
+          ICD=$(find /usr -name 'lvp_icd*.json' 2>/dev/null | head -1)
+          echo "ICD=${ICD:-none}"
+          if [ -n "${ICD:-}" ]; then export VK_ICD_FILENAMES="$ICD"; fi
+          python3 pawnsicon/pixel.py out/c.txt --harness build/harness --frag build/ui.spv \
+                  --vert build/quad.spv --main vk/assets/royalbed_south.rgba | tee out/st.txt
+
+      - name: Gate
+        run: python3 pawnsicon/gate.py out/a.txt out/b.txt out/c.txt out/st.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### stfix: A 2.7.0 / B 2.7.1 / C 2.7.2"
+            echo '```'
+            grep -aE '^\[ANIMALICON\] (species=(Rat|Ibex|Squirrel) step=(icon|st|draw)|mod packageId=sleepsheep|glyphfix assembly|RESULT)' out/a.txt out/b.txt out/c.txt || true
+            echo '```'
+            echo '```'
+            cat out/st.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stfix-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: warn
