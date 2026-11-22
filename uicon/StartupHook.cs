@@ -89,6 +89,8 @@ internal static class StartupHook
                 try { Report(dn); }
                 catch (Exception e) { Console.WriteLine($"{T} def={dn} step=fatal {e.GetType().Name}: {OneLine(e.Message)}"); }
             }
+
+            Controls();
         }
         catch (Exception e)
         {
@@ -192,6 +194,7 @@ internal static class StartupHook
         else
         {
             Console.WriteLine($"{T} def={dn} step=uiIconMaterial null=False {MatFields(uim)}");
+            DumpMembers(dn + "/uiIconMaterial", uim, 24);
             DumpMembers(dn + "/uiIconMaterial.shader", uim.shader, 24);
         }
 
@@ -259,6 +262,31 @@ internal static class StartupHook
                 Console.WriteLine($"{T} def={dn} step=thingicon.call threw {e.GetType().Name}: {OneLine(e.Message)}"
                                   + $" workerReached={workerHit} at={Where(e)}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Two controls, so "the CutoutComplexUI material cannot render" is measured rather than assumed:
+    /// every Map/* shader the port declares (Cutout is the one the working world draw uses) and one
+    /// texture the harness already draws, loaded through the same ContentFinder path as the animals.
+    /// </summary>
+    private static void Controls()
+    {
+        foreach (Shader sh in new[] { ShaderDatabase.Cutout, ShaderDatabase.CutoutComplex, ShaderDatabase.CutoutComplexUI })
+        {
+            Console.WriteLine($"{T} control shader name='{(sh == null ? "<null>" : sh.name)}'");
+            DumpMembers("shader/" + (sh == null ? "<null>" : sh.name), sh, 24);
+        }
+
+        foreach (string key in new[]
+        {
+            "Things/Item/Equipment/WeaponRanged/UniqueWeapons/Revolver/UniqueRevolverA",
+            "Things/Item/Equipment/WeaponRanged/Revolver",
+        })
+        {
+            Texture2D t = ContentFinder<Texture2D>.Get(key, false);
+            Console.WriteLine($"{T} control texture key={key} value={Describe(t)}");
+            if (t != null) ReportTexture("control", "worldart", t);
         }
     }
 
