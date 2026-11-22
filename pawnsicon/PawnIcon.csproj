@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Startup hook (DOTNET_STARTUP_HOOKS) for .github/workflows/pawnsicon.yml.
+
+    Runs inside the real host: lets the game's own Play scene build a map, generates one real animal
+    pawn per species with PawnGenerator, spawns it with GenSpawn, then asks
+    Widgets.GetIconFor(pawn, ...) - the exact call PawnColumnWorker_Label -> Widgets.ThingIcon makes -
+    what texture / material / colour it hands back. Also hooks Widgets.ThingIconWorker so the value
+    that actually reaches the draw call is observed, not inferred.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>PawnIcon</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS0649;CS0169;CS8632</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>../dlls/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityStubs"><HintPath>../dlls/UnityStubs.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Waylith"><HintPath>../dlls/Waylith.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>../dlls/0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
