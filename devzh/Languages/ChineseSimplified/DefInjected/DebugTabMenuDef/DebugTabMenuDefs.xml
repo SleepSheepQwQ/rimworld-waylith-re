@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+  <Actions>
+    <label>动作/工具</label>
+  </Actions>
+  <Settings>
+    <label>设置</label>
+  </Settings>
+  <Output>
+    <label>输出</label>
+  </Output>
+</LanguageData>
