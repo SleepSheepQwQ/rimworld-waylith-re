@@ -54,8 +54,8 @@ jobs:
               +login anonymous \
               +workshop_download_item 294100 "$ID" validate \
               +quit 2>&1 | tee "out/steamcmd-$ID.log"
-            ROOT="$HOME/.steam/steam/steamapps/workshop/content/294100/$ID"
-            ALT="$PWD/steamcmd/steamapps/workshop/content/294100/$ID"
+            ROOT="$PWD/out/steamapps/workshop/content/294100/$ID"
+            ALT="$HOME/.steam/steam/steamapps/workshop/content/294100/$ID"
             echo "root=$ROOT exists=$([ -d "$ROOT" ] && echo yes || echo no)"
             echo "alt=$ALT exists=$([ -d "$ALT" ] && echo yes || echo no)"
             for d in "$ROOT" "$ALT"; do
