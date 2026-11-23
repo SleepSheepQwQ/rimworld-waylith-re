@@ -132,3 +132,53 @@ expression the Thing branch uses — and `src=graphic` marks those lines.
 - Commands ≤ 15 s; use short polls, never long sleeps.
 - Quote the doc (`docs/UNIQUE-WEAPON-ICON.md §…`) instead of re-proving these facts.
 - Every hypothesis must come with a file:line, an observable criterion, and a test that could falsify it.
+
+## Findings (five independent probes, 2026-11-24)
+
+### The chain, end to end
+
+1. Odyssey ships 13 unique weapons (not 12). All are `Graphic_Random` + `CutoutComplex`.
+2. The 128 pack entries are **64 BC7 albedos + 64 BC4 masks**, every one a DX10 header with an exact
+   8-mip chain (`_m` = 11,084 B = 148-byte header + 10,936-byte BC4 payload). No DXT1/3/5, no BC5.
+3. `Texture2D.name` keeps the inner extension (`UniqueRevolverA_m.png`), so
+   `Graphic_Collection.Init`'s `!name.EndsWith("_m")` filter never fires and every mask becomes a
+   sibling variant; `orderby x.name` then sorts `X_m.png` **before** `X.png`.
+4. `BuildableDef.ResolveIcon` resolves the def icon through `ExtractInnerGraphicFor(null)` →
+   `SubGraphicFor(null)` → **`subGraphics[0]`**, i.e. the mask. So the def-level icon is a mask for
+   every one of these weapons — not a per-instance lottery.
+5. Masks are BC4 behind DX10. `ModDdsLoader` maps any DX10 header to BC7, the payload is half the
+   size BC7 needs, `LoadRawTextureData` rejects it, and the texture becomes `BaseContent.BadTex`.
+   `GetPixels32()` on it throws `IndexOutOfRangeException`.
+6. `Widgets.ThingIcon(Rect, ThingDef)` returns before `GetIconFor` when `uiIcon` is null or `BadTex`
+   → the tile is blank, and no postfix on `GetIconFor` ever runs.
+
+Measured on the harness (run 45237630449): healthy layout → `uiIcon=UniqueRevolverA`, 12.89 % opaque,
+DRAW. `.png.dds` leak layout → 10 variants / 5 masks, `uiIcon=UniqueRevolverA_m.png`, MASK-ICON. The
+same layout with a DX10 BC4 mask → `uiIcon` unreadable, `defIconBlank=True`.
+
+### Corrections to earlier notes
+
+- `iconexec`'s "GetIconFor → MatSingle → Rand.Range, 1000/2000 masks" was a **misread of the IL**: that
+  probe used the loop counter as `thingIDNumber`, so `i % 10` produced the masks deterministically. The
+  numbers were right, the attribution was not. `MatSingle`'s `Rand.Range` is real but neither icon path
+  goes through it.
+- There are 13 `*_Unique` defs, not 12; the 64 masks are BC4, not BC5.
+
+### Why 2.7.7 is expected to be correct anyway
+
+`CollectionFix` (postfix on `Graphic_Collection.Init`, inherited by `Graphic_Random`) drops the masks
+when the list is exactly "texture + its mask" pairs. All 13 folders satisfy that shape (128 entries,
+0 violations), so after the patch `subGraphics[0]` is albedo and the def icon draws. The harness run
+above had GlyphFix **not** installed, which is why it shows the raw failure.
+
+### What is still broken in 2.7.7
+
+1. `IconFieldFix`'s Thing branch never runs: `Thing.def` is a public **field**, but `Prop(arg, "def")`
+   only looks for properties. So an instance whose `uiIcon` is `BadTex` is never repaired.
+2. `IconFieldFix.Fill` uses `graphic.path`, which for a `Graphic_Collection` is the **folder**; the real
+   variant name lives in `subGraphics[i].path`. `ContentFinder.Get(folder)` always misses.
+3. `DdsFormatFix` only scans loose `Textures/**/*.dds` on disk. Pack-channel DDS (inside `Assets.zip`)
+   is out of scope, so BC4/BC5 masks shipped in packs still decode as BC7 and become `BadTex`.
+
+Both (1) and (2) have a compile-verified patch proposed in the probe report; (3) needs
+`ModDdsLoader.TryLoadDds` to be the repair point instead of a filesystem index.
