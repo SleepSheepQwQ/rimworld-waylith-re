@@ -41,8 +41,8 @@ def main(path):
             instances.setdefault(m.group("def"), []).append((m.group("id"), m.group("rest")))
 
     print(f"lines={len(lines)} gated_defs={len(gates)} instance_defs={len(instances)}")
-    print(f"{'def':34} {'sub':>4} {'art':>4} {'mask':>5} {'uiIcon':12} {'defCov':>8} "
-          f"{'material':24} {'picks a/m':10} {'blankIds':>9} verdict (reason)")
+    print(f"{'def':34} {'sub':>4} {'art':>4} {'mask':>5} {'uiIcon':12} {'uiCov':>8} {'defCov':>8} "
+          f"{'material':24} {'props':>5} {'picks a/m':10} {'blankIds':>9} verdict (reason)")
     rows = {}
     for dn in (REAL, PLAIN, LEAK, DX10):
         g = gates.get(dn)
@@ -54,23 +54,24 @@ def main(path):
         picks = f"{pk.group(1)}/{pk.group(2)}" if pk else "-"
         row = {
             "sub": field(g, "subCount"), "art": field(g, "art"), "mask": field(g, "masks"),
-            "ui": field(g, "uiIcon"), "cov": field(g, "defCov"),
-            "mat": field(g, "uiIconMaterial"), "picks": picks,
+            "ui": field(g, "uiIcon"), "uicov": field(g, "uiIconCov"), "cov": field(g, "defCov"),
+            "mat": field(g, "uiIconMaterial"), "props": field(g, "props"), "picks": picks,
             "blank": field(g, "blankPicks"), "verdict": field(g, "verdict"),
-            "reason": field(g, "reason"), "props": field(g, "props"),
-            "present": field(g, "present"),
+            "reason": field(g, "reason"), "present": field(g, "present"),
+            "matrisk": field(g, "matRisk"),
         }
         rows[dn] = row
         print(f"{dn:34} {row['sub']:>4} {row['art']:>4} {row['mask']:>5} {row['ui']:12} "
-              f"{row['cov']:>8} {row['mat']:24} {picks:10} {row['blank']:>9} "
-              f"{row['verdict']} ({row['reason']})")
+              f"{row['uicov']:>8} {row['cov']:>8} {row['mat']:24} {row['props']:>5} {picks:10} "
+              f"{row['blank']:>9} {row['verdict']} ({row['reason']})")
 
     print()
     for dn in (REAL, PLAIN, LEAK, DX10):
         for iid, rest in instances.get(dn, []):
             px = re.search(r"px=(.*)$", rest)
             print(f"pick {dn:34} id={iid:>2} sub={field(rest,'sub'):26} mask={field(rest,'mask'):5} "
-                  f"icon={field(rest,'icon'):28} cov={field(rest,'cov'):>7} px={px.group(1) if px else '?'}")
+                  f"icon={field(rest,'icon'):28} src={field(rest,'src'):18} cov={field(rest,'cov'):>7} "
+                  f"px={px.group(1) if px else '?'}")
 
     fails = []
 
@@ -78,10 +79,15 @@ def main(path):
         if not cond:
             fails.append(msg)
 
+    # The real def is the control the harness can actually build: loose PNGs, healthy names.
     expect(rows[REAL] is not None and rows[REAL]["present"] == "true", f"{REAL}: def not loaded")
     if rows[REAL]:
-        expect(int(rows[REAL]["sub"]) >= 5, f"{REAL}: subCount={rows[REAL]['sub']}")
+        expect(rows[REAL]["sub"] == "5", f"{REAL}: expected 5 art variants, got {rows[REAL]['sub']}")
+        expect(rows[REAL]["mask"] == "0", f"{REAL}: masks={rows[REAL]['mask']}")
+        expect(rows[REAL]["ui"] == "art", f"{REAL}: uiIcon kind={rows[REAL]['ui']}")
+        expect(rows[REAL]["verdict"] == "DRAW", f"{REAL}: verdict={rows[REAL]['verdict']}")
 
+    # Plain .dds: same bytes, healthy names -> 5/0 and an art icon that draws.
     expect(rows[PLAIN] is not None, f"{PLAIN}: no gate line")
     if rows[PLAIN]:
         expect((rows[PLAIN]["sub"], rows[PLAIN]["mask"]) == ("5", "0"),
@@ -89,20 +95,31 @@ def main(path):
         expect(rows[PLAIN]["verdict"] == "DRAW", f"{PLAIN}: verdict={rows[PLAIN]['verdict']}")
         expect(rows[PLAIN]["blank"] == "0/10", f"{PLAIN}: blankPicks={rows[PLAIN]['blank']}")
 
-    for dn in (LEAK, DX10):
-        expect(rows[dn] is not None, f"{dn}: no gate line")
-        if not rows[dn]:
-            continue
-        expect((rows[dn]["sub"], rows[dn]["mask"]) == ("10", "5"),
-               f"{dn}: expected 10/5, got {rows[dn]['sub']}/{rows[dn]['mask']}")
-        expect(rows[dn]["picks"].endswith("/5"), f"{dn}: expected 5 mask picks, got {rows[dn]['picks']}")
+    # The leak: 10 entries / 5 masks, and ResolveIcon's subGraphics[0] is a mask.
+    expect(rows[LEAK] is not None, f"{LEAK}: no gate line")
+    if rows[LEAK]:
+        expect((rows[LEAK]["sub"], rows[LEAK]["mask"]) == ("10", "5"),
+               f"{LEAK}: expected 10/5, got {rows[LEAK]['sub']}/{rows[LEAK]['mask']}")
+        expect(rows[LEAK]["ui"] == "mask", f"{LEAK}: uiIcon kind={rows[LEAK]['ui']}")
+        expect(rows[LEAK]["verdict"] in ("MASK-ICON", "MASK-VARIANTS"),
+               f"{LEAK}: verdict={rows[LEAK]['verdict']}")
+        expect(rows[LEAK]["picks"].endswith("/5"), f"{LEAK}: expected 5 mask picks, got {rows[LEAK]['picks']}")
+
+    # The shipped mask shape: 10/5 and nothing readable to draw.
+    expect(rows[DX10] is not None, f"{DX10}: no gate line")
+    if rows[DX10]:
+        expect((rows[DX10]["sub"], rows[DX10]["mask"]) == ("10", "5"),
+               f"{DX10}: expected 10/5, got {rows[DX10]['sub']}/{rows[DX10]['mask']}")
+        expect(rows[DX10]["verdict"] == "BLANK", f"{DX10}: verdict={rows[DX10]['verdict']}")
+        expect(rows[DX10]["reason"] == "uiIcon-unreadable", f"{DX10}: reason={rows[DX10]['reason']}")
 
     print()
     if fails:
         for f in fails:
             print("FAIL:", f)
         return 1
-    print("PASS: fixture models the shipped layout (5/0 healthy, 10/5 leaked)")
+    print("PASS: real def draws, plain fixture draws 5/0, .png.dds leak is 10/5 with a mask icon,"
+          " DX10-mask leak is unreadable")
     return 0
 
 

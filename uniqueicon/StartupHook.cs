@@ -9,26 +9,29 @@ using UnityEngine;
 using Verse;
 
 /// <summary>
-/// Measures the unique-weapon icon chain inside the real host, one def per run-class:
+/// Measures the unique-weapon icon chain inside the real host, one def per class:
 ///
 ///   [UNIQ] def=Gun_Revolver_Unique present=true graphic=Graphic_RandomRotated inner=Graphic_Random subCount=5 masks=0
 ///   [UNIQ] def=... sub[0] path=... tex=... size=128x128 fmt=DXT1 px=...
-///   [UNIQ] def=... uiIcon ... uiIconMaterial shader=CutoutComplexUI props=0
+///   [UNIQ] def=... uiIcon ... uiIconMaterial shader=CutoutComplexUI props=5
 ///   [UNIQ] def=... getIconForDef tex=... cov=...
 ///   [UNIQ] def=... instance id=0 sub=... icon=... mask=false cov=...
-///   [UNIQ] def=... gate ... verdict=DRAW|MASK-VARIANTS|BLANK reason=...
+///   [UNIQ] def=... gate ... verdict=DRAW|MASK-VARIANTS|MASK-ICON|BLANK reason=...
 ///
 /// The decision rule, and nothing else, decides the verdict:
-///   BLANK          uiIcon is null / BaseContent.BadTex / <=2x2, or GetIconFor(def) has zero
-///                  non-transparent texels. Widgets.ThingIcon(Rect, ThingDef) returns before
-///                  GetIconFor in the first three cases, so nothing is drawn at all.
-///   MASK-VARIANTS  subCount is larger than the art count because _m masks became subgraphics:
-///                  Graphic_Random picks subGraphics[thingIDNumber % n], so the mask entries are
-///                  drawn as icons for part of the ids (the shipped leak).
-///   DRAW-MATERIAL  texture is real with pixels, but uiIconMaterial is a CutoutComplexUI material
-///                  (measured elsewhere: 0 of 16384 pixels when _MainTex_ST is not identity).
-///   DRAW           real texture, opaque pixels, no uiIconMaterial -> the plain GUI.DrawTexture
-///                  branch every Cutout species' icon already uses.
+///   BLANK          uiIcon is null / BaseContent.BadTex / <=2x2, its GetPixels32 throws (a texture
+///                  the GPU never receives pixels for), its opaque fraction is 0, or
+///                  Widgets.GetIconFor(ThingDef) is empty. Widgets.ThingIcon(Rect, ThingDef) returns
+///                  before GetIconFor for the null/BadTex cases, so nothing is drawn at all.
+///   MASK-ICON      uiIcon is a *_m mask. ResolveIcon asks ExtractInnerGraphicFor(null) ->
+///                  SubGraphicFor(null) -> subGraphics[0], and the culture-sensitive orderby puts
+///                  "X_m.png" before "X.png"; the def-level icon is therefore a flat grey tile.
+///   MASK-VARIANTS  subGraphics holds masks but subGraphics[0] is art: Graphic_Random picks
+///                  subGraphics[thingIDNumber % n], so part of the ids draw a mask.
+///   DRAW           real art texture, readable pixels, no mask in the table.
+///
+/// uiIconMaterial is reported, never used as the verdict: every CutoutComplex def carries one
+/// (props=5 here, including the healthy control), so "material present" cannot discriminate.
 /// </summary>
 internal static class StartupHook
 {
@@ -229,39 +232,54 @@ internal static class StartupHook
                           + $" shader='{(defMat == null || defMat.shader == null ? "<null>" : defMat.shader.name)}'"
                           + $" px={Px(defIcon)}{(defIconErr == null ? "" : " err=" + defIconErr)}");
 
-        // Graphic_Random picks per instance: subGraphics[thingIDNumber % n].
+        // Graphic_Random picks per instance: subGraphics[thingIDNumber % n]. SubGraphicAtIndex is the
+        // same engine expression, and it works without a spawned Thing; MakeThing is attempted once so
+        // a failure is reported with its stack instead of silently turning every id into "<null>".
         var rand = inner as Graphic_Random;
+        Thing probeThing = null;
+        string makeErr = null;
+        try { probeThing = ThingMaker.MakeThing(def); }
+        catch (Exception e) { makeErr = e.GetType().Name + ": " + One(e.Message) + " @ " + FirstFrame(e); }
+        Console.WriteLine($"{T} def={defName} makeThing ok={probeThing != null} err={(makeErr ?? "-")}");
+
         int maskPicks = 0, artPicks = 0, nullPicks = 0, blankPicks = 0;
         var pickLines = new List<string>();
         for (int id = 0; id < Ids; id++)
         {
-            Thing thing = null;
             Graphic picked = null;
-            string subErr = null;
-            try
-            {
-                thing = ThingMaker.MakeThing(def);
-                thing.thingIDNumber = id;
-                picked = rand == null ? null : rand.SubGraphicFor(thing);
-            }
-            catch (Exception e) { subErr = "!" + e.GetType().Name + ":" + One(e.Message); }
+            string pickErr = null;
+            try { picked = rand == null ? null : rand.SubGraphicAtIndex(id); }
+            catch (Exception e) { pickErr = "!" + e.GetType().Name + ":" + One(e.Message); }
 
             string subLeaf = Leaf(picked == null ? null : picked.path);
             bool isMask = IsMask(subLeaf);
 
+            // What that sub-graphic's own material says, i.e. the texture the icon would be.
+            Texture2D tex = null;
+            string texErr = null;
+            try { Material m = picked == null ? null : picked.MatSingle; tex = m == null ? null : m.mainTexture as Texture2D; }
+            catch (Exception e) { texErr = "!" + e.GetType().Name + ":" + One(e.Message); }
+
+            // The real widget call, when a Thing could be built.
             Texture2D icon = null;
             Material iconMat = null;
             string iconErr = null;
-            try
+            string iconSrc = "graphic";
+            if (probeThing != null)
             {
-                float sc, ang;
-                Vector2 pr;
-                Color col;
-                if (thing != null)
-                    icon = Widgets.GetIconFor(thing, new Vector2(128f, 128f), null, false,
+                try
+                {
+                    probeThing.thingIDNumber = id;
+                    float sc, ang;
+                    Vector2 pr;
+                    Color col;
+                    icon = Widgets.GetIconFor(probeThing, new Vector2(128f, 128f), null, false,
                                               out sc, out ang, out pr, out col, out iconMat) as Texture2D;
+                    iconSrc = "geticonfor-thing";
+                }
+                catch (Exception e) { iconErr = "!" + e.GetType().Name + ":" + One(e.Message); }
             }
-            catch (Exception e) { iconErr = "!" + e.GetType().Name + ":" + One(e.Message); }
+            if (icon == null) icon = tex;
 
             double cov = Coverage(icon);
             if (isMask) maskPicks++; else if (picked != null) artPicks++; else nullPicks++;
@@ -269,18 +287,24 @@ internal static class StartupHook
                 || (icon != null && icon.width <= 2) || cov <= 0.0) blankPicks++;
 
             pickLines.Add($"{T} def={defName} instance id={id} sub='{subLeaf}' mask={isMask}"
-                          + $" icon='{(icon == null ? "<null>" : icon.name)}'"
+                          + $" icon='{(icon == null ? "<null>" : icon.name)}' src={iconSrc}"
                           + $" size={(icon == null ? "-" : icon.width + "x" + icon.height)}"
                           + $" cov={Pct(cov)}"
                           + $" shader='{(iconMat == null || iconMat.shader == null ? "<null>" : iconMat.shader.name)}'"
                           + $" px={Px(icon)}"
-                          + $"{(subErr == null ? "" : " subErr=" + subErr)}"
+                          + $"{(pickErr == null ? "" : " pickErr=" + pickErr)}"
+                          + $"{(texErr == null ? "" : " texErr=" + texErr)}"
                           + $"{(iconErr == null ? "" : " iconErr=" + iconErr)}");
         }
         foreach (string l in pickLines) Console.WriteLine(l);
 
         // ---- the decision rule ------------------------------------------------------------
-        string uiState = uiNull ? "null" : uiBad ? "badtex" : uiPlaceholder ? "placeholder(2x2)" : "texture";
+        double uiCov = Coverage(ui);
+        string uiKind = uiNull ? "null"
+                        : uiBad ? "badtex"
+                        : uiPlaceholder ? "placeholder2x2"
+                        : IsMask(Leaf(ui.name)) ? "mask"
+                        : "art";
         string matShader = uim == null || uim.shader == null ? "<null>" : uim.shader.name;
         bool defBlank = defIcon == null
                         || (BaseContent.BadTex != null && ReferenceEquals(defIcon, BaseContent.BadTex))
@@ -289,32 +313,26 @@ internal static class StartupHook
         bool maskLeak = masks > 0;
         bool matRisk = uim != null && matShader.StartsWith("CutoutComplexUI", StringComparison.Ordinal);
 
-        string verdict, reason;
-        if (uiState == "null" || uiState == "badtex" || uiState == "placeholder(2x2)" || defBlank)
-        {
-            verdict = "BLANK";
-            reason = uiState != "texture" ? "uiIcon=" + uiState : "defIcon-empty";
-        }
-        else if (maskLeak)
-        {
-            verdict = "MASK-VARIANTS";
-            reason = $"masks-as-subgraphics({masks}/{subs.Length})";
-        }
-        else if (matRisk)
-        {
-            verdict = "DRAW-MATERIAL";
-            reason = "uiIconMaterial=" + matShader;
-        }
-        else
-        {
-            verdict = "DRAW";
-            reason = "plain-texture-branch";
-        }
+        // A texture that exists but cannot be decoded (GetPixels32 throws) is as blank as a null one:
+        // the GPU never receives pixels. Readability is therefore part of "draws", not a detail.
+        bool uiReadable = ui != null && uiCov >= 0;
+        bool blank = uiNull || uiBad || uiPlaceholder || !uiReadable || uiCov <= 0.0 || defBlank;
+        string verdict = blank ? "BLANK"
+                         : uiKind == "mask" ? "MASK-ICON"
+                         : maskLeak ? "MASK-VARIANTS"
+                         : "DRAW";
+        string reason = blank ? (uiNull ? "uiIcon-null" : uiBad ? "uiIcon-badtex" : uiPlaceholder ? "uiIcon-2x2"
+                                    : !uiReadable ? "uiIcon-unreadable" : uiCov <= 0.0 ? "uiIcon-zero-opaque"
+                                    : "defIcon-empty")
+                        : uiKind == "mask" ? "subGraphics[0]-is-mask"
+                        : maskLeak ? $"masks-as-subgraphics({masks}/{subs.Length})"
+                        : "art-subgraphs-only";
 
         Console.WriteLine($"{T} def={defName} gate present=true subCount={subs.Length} art={subs.Length - masks}"
-                          + $" masks={masks} uiIcon={uiState} uiIconCov={Pct(Coverage(ui))}"
+                          + $" masks={masks} uiIcon={uiKind} uiIconCov={Pct(uiCov)}"
                           + $" defIconBlank={defBlank} defCov={Pct(defCov)}"
                           + $" uiIconMaterial={(uim == null ? "<null>" : matShader)} props={props}"
+                          + $" matRisk={matRisk}"
                           + $" picks(art={artPicks},mask={maskPicks},null={nullPicks}) blankPicks={blankPicks}/{Ids}"
                           + $" verdict={verdict} reason={reason}");
 
@@ -326,6 +344,22 @@ internal static class StartupHook
     // ------------------------------------------------------------------ helpers
 
     private static void Fail(string why) { Failed.Add(why); }
+
+    /// <summary>Innermost frame of an exception, for a one-line diagnosis of a harness-side failure.</summary>
+    private static string FirstFrame(Exception e)
+    {
+        try
+        {
+            string s = e.StackTrace ?? "";
+            foreach (string line in s.Split('\n'))
+            {
+                string t = line.Trim();
+                if (t.Length > 0) return t;
+            }
+        }
+        catch { }
+        return "?";
+    }
 
     /// <summary>Graphic_RandomRotated.subGraphic (and any other wrapper's child), by name.</summary>
     private static Graphic Unwrap(Graphic g)
