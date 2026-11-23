@@ -108,13 +108,14 @@ def main():
         check("Rat.control_texture_present", bool(d) and d["texnull"] == "False",
               "the measurement is vacuous if the icon texture itself is missing")
 
-    if scenario in ("glyphfix_only", "fake_observe", "fake_null_first", "fake_multi", "mitig_first", "mitig_last"):
+    if scenario in ("glyphfix_only", "fake_observe", "fake_null_first", "fake_multi", "mitig_first", "mitig_last",
+                    "mitig_min", "restore_min"):
         for sp in ("Rat", "Ibex"):
             d = icons.get(sp)
             check(f"{sp}.glyphfix_dropped_material", bool(d) and d["matnull"] == "True",
                   f"{sp} material={d['mat'] if d else '?'} (GlyphFix 2.7.7 must leave null)")
 
-    if scenario in ("fake_observe", "fake_null_first", "fake_null_last", "fake_multi"):
+    if scenario in ("fake_observe", "fake_null_first", "fake_null_last", "fake_multi", "restore_stock", "restore_min"):
         ok_patch = "fake.thing patch=ok" in body
         check("fake.patched_before_glyphfix", ok_patch, "" if ok_patch else "fake postfix was not installed")
 
@@ -141,10 +142,27 @@ def main():
               bool(dc) and (dc["white"] == "True" or dc["black"] == "True"),
               f"tex={dc['tex'] if dc else '?'}")
 
-    if scenario in ("mitig_first", "mitig_last"):
+    if scenario in ("mitig_first", "mitig_last", "mitig_min"):
         d = icons.get("Rat")
         check("Rat.mitigation_run_measured", bool(d) and d["matnull"] == "True",
-              f"tex={d['tex'] if d else '?'} texNull={d['texnull'] if d else '?'} (survival is compared across the two builds)")
+              f"tex={d['tex'] if d else '?'} texNull={d['texnull'] if d else '?'} (survival is compared across the builds)")
+
+    if scenario == "mitig_min":
+        d = icons.get("Rat")
+        check("Rat.min_priority_survives_last_clobber",
+              bool(d) and d["texnull"] == "False",
+              f"tex={d['tex'] if d else '?'} (int.MinValue must run after Priority.Last)")
+
+    if scenario in ("restore_stock", "restore_min"):
+        d = icons.get("Rat")
+        print(f"note: material restore -> Rat material={d['mat'] if d else '?'} "
+              f"materialNull={d['matnull'] if d else '?'} (restore_stock may legitimately show the material back)")
+
+    if scenario == "restore_min":
+        d = icons.get("Rat")
+        check("Rat.min_priority_keeps_material_dropped",
+              bool(d) and d["matnull"] == "True",
+              f"material={d['mat'] if d else '?'} (int.MinValue must drop the restored material)")
 
     # Harmony-semantics half: only run on the first scenario (it is process-global, run once).
     m3 = SYNTH3.search(body)

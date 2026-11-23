@@ -103,6 +103,15 @@ jobs:
       - name: "fake_multi - two foreign ref __result postfixes, then GlyphFix"
         run: bash patchconflict/run_case.sh fake_multi multi out/GlyphFix-stock.dll
 
+      - name: "restore_stock - a later postfix puts the CutoutComplexUI material back"
+        run: bash patchconflict/run_case.sh restore_stock restore_material out/GlyphFix-stock.dll
+
+      - name: "mitig_min - GlyphFix postfix at int.MinValue, same null clobber"
+        run: bash patchconflict/run_case.sh mitig_min null_last out/GlyphFix-priomin.dll
+
+      - name: "restore_min - int.MinValue build against the material restore"
+        run: bash patchconflict/run_case.sh restore_min restore_material out/GlyphFix-priomin.dll
+
       - name: "mitig_first - GlyphFix postfix at Priority.First, same clobber"
         run: bash patchconflict/run_case.sh mitig_first null_last out/GlyphFix-priofirst.dll
 
@@ -113,7 +122,7 @@ jobs:
         run: |
           set -o pipefail
           rc=0
-          for s in control_nogf glyphfix_only fake_observe fake_null_first fake_null_last fake_multi mitig_first mitig_last; do
+          for s in control_nogf glyphfix_only fake_observe fake_null_first fake_null_last fake_multi restore_stock mitig_first mitig_last mitig_min restore_min; do
             echo "--- $s ---"
             python3 patchconflict/gate.py "$s" "out/$s.log" | tee "out/gate-$s.txt" || rc=1
           done

@@ -161,6 +161,16 @@ internal static class StartupHook
         MethodInfo def = FindIconFor(typeof(ThingDef), wantColor: false);
         Line($"fake.targets thing={(thing == null ? "<null>" : Sig(thing))} def={(def == null ? "<null>" : Sig(def))}");
 
+        // The 2.7.7 fix is "drop the CutoutComplexUI material". This mode reproduces a mod that
+        // *re-adds* it: capture it at Priority.First (before GlyphFix sees it), put it back at
+        // Priority.Last (after GlyphFix dropped it).
+        if (_mode == "restore_material")
+        {
+            if (thing != null) PatchFake(thing, nameof(FakeCapturePostfix), HarmonyLib.Priority.First, "fake.thing");
+            if (thing != null) PatchFake(thing, nameof(FakeRestorePostfix), HarmonyLib.Priority.Last, "fake.thingRestore");
+            return;
+        }
+
         int priority = _mode == "null_first" ? HarmonyLib.Priority.First
                      : _mode == "null_last" ? HarmonyLib.Priority.Last
                      : HarmonyLib.Priority.Normal;
@@ -235,6 +245,41 @@ internal static class StartupHook
     {
         Enter("defB", thingDef?.defName, __result, material, Color.white);
         try { if (_mode == "multi") __result = BaseContent.BlackTex; }
+        catch (Exception e) { FakeFail(e); }
+    }
+
+    // ---- restore_material: two postfixes that bracket GlyphFix ---------------------------------
+
+    private static readonly Dictionary<string, Material> Captured = new Dictionary<string, Material>();
+    private static readonly object CaptureLock = new object();
+
+    /// <summary>First: remember the material the original GetIconFor built, before GlyphFix drops it.</summary>
+    public static void FakeCapturePostfix(Thing thing, ref Texture __result, ref Material material, ref Color color)
+    {
+        Enter("cap", thing?.def?.defName, __result, material, color);
+        try
+        {
+            string def = thing?.def?.defName ?? "?";
+            if (material != null && !string.IsNullOrEmpty(material.name) &&
+                material.name.StartsWith("CutoutComplexUI", StringComparison.Ordinal))
+            {
+                lock (CaptureLock) Captured[def] = material;
+            }
+        }
+        catch (Exception e) { FakeFail(e); }
+    }
+
+    /// <summary>Last: put that material back, i.e. undo GlyphFix 2.7.7's drop.</summary>
+    public static void FakeRestorePostfix(Thing thing, ref Texture __result, ref Material material, ref Color color)
+    {
+        try
+        {
+            string def = thing?.def?.defName ?? "?";
+            Material stored = null;
+            lock (CaptureLock) Captured.TryGetValue(def, out stored);
+            Enter("rest", def, __result, material, color);
+            if (material == null && stored != null) material = stored;
+        }
         catch (Exception e) { FakeFail(e); }
     }
 
@@ -510,6 +555,26 @@ internal static class StartupHook
         try { Widgets.ThingIcon(new Rect(0f, 0f, 32f, 32f), pawn); }
         catch (Exception e) { drawErr = $"{e.GetType().Name}: {OneLine(e.Message)}"; }
         Line($"species={name} step=draw fakeCallsInDraw={_fakeThingCalls - drawBefore} error='{drawErr}'");
+
+        // A fresh call after the draw path: what a caller sees once the *last* postfix has had its
+        // say on the material as well as on __result. This is where a later postfix that puts the
+        // CutoutComplexUI material back shows up (the 2.7.7 fix is exactly "material is null").
+        float s2 = 0f, a2 = 0f;
+        Vector2 p2 = Vector2.zero;
+        Color c2 = Color.magenta;
+        Material m2 = null;
+        Texture t2 = null;
+        string err2 = "-";
+        try
+        {
+            t2 = Widgets.GetIconFor(pawn, Vector2.one, null, false,
+                                    out s2, out a2, out p2, out c2, out m2);
+        }
+        catch (Exception e) { err2 = $"{e.GetType().Name}: {OneLine(e.Message)}"; }
+        bool m2Complex = m2 != null && !string.IsNullOrEmpty(m2.name) &&
+                         m2.name.StartsWith("CutoutComplexUI", StringComparison.Ordinal);
+        Line($"species={name} step=icon2 tex='{Name(t2)}' material='{Name(m2)}' " +
+             $"materialNull={(m2 == null)} isCutoutComplexUI={m2Complex} color={C(c2)} error='{err2}'");
     }
 
     // ================================================================= helpers

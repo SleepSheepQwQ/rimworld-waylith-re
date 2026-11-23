@@ -47,3 +47,6 @@ def build(name: str, replacement: str) -> None:
 build("stock", needle)
 build("priofirst", "harmony.Patch(m, postfix: new HarmonyMethod(closed) { priority = Priority.First });")
 build("priolast", "harmony.Patch(m, postfix: new HarmonyMethod(closed) { priority = Priority.Last });")
+# Strictly after every standard priority (First=800, Normal=0, Last=-800): the repair runs once, on
+# the result every other postfix produced.
+build("priomin", "harmony.Patch(m, postfix: new HarmonyMethod(closed) { priority = int.MinValue });")

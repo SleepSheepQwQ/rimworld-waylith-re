@@ -36,8 +36,11 @@ SCENARIOS = [
     ("fake_null_first", "null_first/First", "stock"),
     ("fake_null_last", "null_last/Last", "stock"),
     ("fake_multi", "multi x2", "stock"),
+    ("restore_stock", "restore_material", "stock"),
     ("mitig_first", "null_last/Last", "prio=First"),
     ("mitig_last", "null_last/Last", "prio=Last"),
+    ("mitig_min", "null_last/Last", "prio=MinValue"),
+    ("restore_min", "restore_material", "prio=MinValue"),
 ]
 
 
@@ -87,6 +90,9 @@ def main():
     defeat = tex_null("fake_null_last", "Rat") or tex_null("fake_null_last", "Ibex")
     first_survives = not tex_null("mitig_first", "Rat")
     last_survives = not tex_null("mitig_last", "Rat")
+    min_survives = not tex_null("mitig_min", "Rat")
+    material_defeat = not mat_null("restore_stock", "Rat")
+    material_mitigated = mat_null("restore_min", "Rat")
 
     synth = SYNTH3.search(data["glyphfix_only"]["body"]) or SYNTH3.search(data["control_nogf"]["body"])
     synth_result = synth.group("r") if synth else "?"
@@ -100,16 +106,23 @@ def main():
     if throw:
         print(f"harmony.throwing_postfix error='{throw.group('e')}' ran(throw={throw.group('t')},p2t={throw.group('p2t')},plastt={throw.group('plastt')})")
     print(f"glyphfix.silently_defeated_by_later_postfix={defeat}")
+    print(f"glyphfix.material_drop_silently_restored={material_defeat}")
     print(f"mitigation.priority_first_survives={first_survives}")
     print(f"mitigation.priority_last_survives={last_survives}")
-    if first_survives or last_survives:
+    print(f"mitigation.priority_minvalue_survives={min_survives}")
+    print(f"mitigation.minvalue_keeps_material_dropped={material_mitigated}")
+    if min_survives:
+        print("mitigation.recommended=int.MinValue (runs after First/Normal/Last; only a later patch at the same priority can still win)")
+    elif first_survives or last_survives:
         print(f"mitigation.recommended={'Priority.First' if first_survives else 'Priority.Last'}")
     else:
         print("mitigation.recommended=none-of-the-priorities; forward to TryRepair at the last consumer instead")
 
     print()
     if install_ok and binds and multi_ok:
-        print("verdict=" + ("FOREIGN_POSTFIX_CAN_CLOBBER_SILENTLY" if defeat else "FOREIGN_POSTFIX_CANNOT_CLOBBER"))
+        extra = "MATERIAL_ALSO_RESTORABLE" if material_defeat else "MATERIAL_KEPT_NULL"
+        print("verdict=" + ("FOREIGN_POSTFIX_CAN_CLOBBER_SILENTLY" if defeat else "FOREIGN_POSTFIX_CANNOT_CLOBBER") + "_" + extra)
+        print(f"mitigation_verdict={'FIXED_BY_MINVALUE' if (min_survives and material_mitigated) else 'NOT_FIXED_BY_MINVALUE'}")
     else:
         print("verdict=INCONCLUSIVE")
     return 0
