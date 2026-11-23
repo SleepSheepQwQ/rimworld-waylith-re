@@ -18,20 +18,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Install steamcmd
+      - name: Install steamcmd (official tarball, 32-bit runtime)
         run: |
           set -euo pipefail
           sudo dpkg --add-architecture i386
           sudo apt-get update -qq
-          sudo apt-get install -y -qq steamcmd
-          steamcmd +quit || true
+          sudo apt-get install -y lib32gcc-s1 ca-certificates
+          mkdir -p "$PWD/steamcmd"
+          curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf - -C "$PWD/steamcmd"
+          "$PWD/steamcmd/steamcmd.sh" +quit || true
+          "$PWD/steamcmd/steamcmd.sh" +version || true
 
       - name: Download the item (anonymous)
         run: |
           set -euo pipefail
           ID="${{ github.event.inputs.item_id }}"
           mkdir -p out
-          steamcmd +force_install_dir "$PWD/out" \
+          "$PWD/steamcmd/steamcmd.sh" +force_install_dir "$PWD/out" \
                    +login anonymous \
                    +workshop_download_item 294100 "$ID" \
                    +quit | tee out/steamcmd.log
