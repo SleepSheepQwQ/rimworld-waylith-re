@@ -1,0 +1,106 @@
+name: uniqueicon
+
+# Direction five: reproduce and measure the unique-weapon icon. One boot, one probe, four defs:
+#
+#   Gun_Revolver_Unique            the real Odyssey def, against the harness's loose-PNG subset
+#   UniqueRevolverFixturePlain     fixture control: 128x128 BC1 .dds + _m.dds, Graphic_Random,
+#                                  CutoutComplex                      -> expect 5 variants / 0 masks
+#   UniqueRevolverFixtureLeak      the same bytes named .png.dds / _m.png.dds (the shipped shape)
+#                                                                     -> expect 10 / 5
+#   UniqueRevolverFixtureDx10      the same leak, masks behind a DX10 header (shipped _m is 11084 B
+#                                  = DX10 header + a BC1-sized chain)   -> expect 10 / 5, and blank
+#
+# Per def the probe prints Graphic type, subGraphics names, the per-instance pick
+# (thingIDNumber % n), uiIcon (null / BadTex / texture), uiIconMaterial (shader + GetPropertyCount),
+# Widgets.GetIconFor(ThingDef) and the opaque-texel fraction of everything it returns.
+on:
+  push:
+    paths:
+      - 'uniqueicon/**'
+      - '.github/workflows/uniqueicon.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uniqueicon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  uniqueicon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost + probe
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build uniqueicon/UniqueIconProbe.csproj -c Release -v minimal
+          ls -l uniqueicon/bin/Release/net10.0/UniqueIconProbe.dll
+
+      - name: Assemble + generate the fixture mod
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          tail -3 out/assemble.log
+          python3 uniqueicon/make_fixture.py --run "$PWD/run" --verify | tee out/fixture.txt
+          python3 - "$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p, encoding="utf-8").read()
+          s = s.replace("<li>ludeon.rimworld.odyssey</li>",
+                        "<li>ludeon.rimworld.odyssey</li>\n    <li>waylith.uniqueiconfixture</li>")
+          open(p, "w", encoding="utf-8").write(s)
+          print(s)
+          PY
+          ls run/Mods/UniqueIconFixture/Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons
+
+      - name: Measure (one boot, four defs)
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/uniqueicon/bin/Release/net10.0/UniqueIconProbe.dll"
+          export PROBE_TIMEOUT_MS=300000
+          export UNIQ_DEFS="Gun_Revolver_Unique,UniqueRevolverFixturePlain,UniqueRevolverFixtureLeak,UniqueRevolverFixtureDx10"
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/probe.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[UNIQ\]' "$PWD/../out/probe.log" | tee "$PWD/../out/uniq.txt" || true
+          echo "run=$GITHUB_RUN_ID"
+
+      - name: Gate + table
+        run: |
+          set -euo pipefail
+          python3 uniqueicon/gate.py out/uniq.txt | tee out/summary.txt
+          {
+            echo '```'
+            cat out/summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "run=$GITHUB_RUN_ID"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uniqueicon-${{ github.run_id }}
+          path: |
+            out/probe.log
+            out/uniq.txt
+            out/summary.txt
+            out/fixture.txt
+            out/assemble.log
+          if-no-files-found: warn
