@@ -63,3 +63,27 @@ C. Is there any code path where a *definition* (not the mod list) loses its `uiI
 ## How to quote this doc
 
 Say "established in docs/LOADING-FACTS.md §N (Assembly-CSharp.decompiled.cs:LINE)" and move on.
+
+## Observed but not reproduced: build-menu icons blank once with extra mods (2026-11-23)
+
+Sequence, exact configurations:
+
+1. Core+5 DLC+GlyphFix 2.7.7 — icons fine (device confirmation, morning).
+2. Added `latta.devl10n` (1.6 build) + `Baldman47.dev1.6.zh`, and the game rewrote ModsConfig
+   leaving the same package id twice in different case — build-menu thumbnails reported blank.
+3. Removed both mods **and** the duplicate entries in one step — icons fine.
+4. Re-added only `latta.devl10n` (no language pack) — icons fine again.
+
+So step 3 changed two variables at once and step 4 did not reproduce the blankness. Treat the cause as
+**unknown and not reproducible**; do not spend budget re-deriving it. What is certain from IL:
+
+- neither the mod list, nor duplicate package ids, nor a throwing mod can stop GlyphFix initialising
+  (see §1 above);
+- `DevInYourLanguage.dll` has no reference to any icon/texture/material API (see §2 above);
+- the only known way to get a *fully* blank tile with GlyphFix healthy is `Widgets.ThingIcon`'s early
+  return when `uiIcon == null || uiIcon == BaseContent.BadTex`, which `IconFieldFix`'s prefix repairs
+  only if the def still exposes a usable graphic or texture path.
+
+If it reappears, capture (a) the def name of one blank tile, (b) the full active mod list, (c) whether a
+fresh restart alone clears it. Those three data points decide between "def has no usable texture" and
+"patch not attached" without guessing.
