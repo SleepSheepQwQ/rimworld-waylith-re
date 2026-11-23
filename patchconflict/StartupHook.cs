@@ -484,9 +484,29 @@ internal static class StartupHook
             gd = kind.lifeStages[kind.lifeStages.Count - 1]?.bodyGraphicData;
         Line($"species={name} step=body texPath='{Name(gd?.texPath)}' shaderType='{Name(gd?.shaderType?.defName)}' color={C(gd?.color ?? Color.white)}");
 
-        Pawn pawn;
-        try { pawn = PawnGenerator.GeneratePawn(kind, null); }
-        catch (Exception e) { Line($"species={name} step=generate FAILED {e.GetType().Name}: {OneLine(e.Message)}"); return; }
+        // PawnGenerator rolls a random life stage, and only the adult stage has art in this harness
+        // (Ibex stage 0/1 use IbexFemale, which is not shipped). A non-adult pawn has no body
+        // graphic, so GetIconFor would return null for a reason that has nothing to do with the
+        // patches under test. Regenerate until the last stage is drawn.
+        int lastStage = kind.lifeStages == null || kind.lifeStages.Count == 0 ? -1 : kind.lifeStages.Count - 1;
+        Pawn pawn = null;
+        int attempt = 0;
+        for (; attempt < 12; attempt++)
+        {
+            try { pawn = PawnGenerator.GeneratePawn(kind, null); }
+            catch (Exception e) { Line($"species={name} step=generate FAILED {e.GetType().Name}: {OneLine(e.Message)}"); return; }
+            int idx = -1;
+            try { idx = pawn == null || pawn.ageTracker == null ? -1 : pawn.ageTracker.CurLifeStageIndex; } catch { }
+            if (pawn != null && (lastStage < 0 || idx == lastStage)) break;
+        }
+        if (pawn == null) { Line($"species={name} step=generate pawn=<null>"); return; }
+        int stage = -1;
+        try { stage = pawn.ageTracker == null ? -1 : pawn.ageTracker.CurLifeStageIndex; } catch { }
+        float age = 0f;
+        try { age = pawn.ageTracker == null ? 0f : pawn.ageTracker.AgeBiologicalYearsFloat; } catch { }
+        string stageName = "-";
+        try { stageName = pawn.ageTracker?.CurLifeStage?.defName ?? "-"; } catch { }
+        Line($"species={name} step=generate attempts={attempt + 1} stageIndex={stage}/{lastStage} lifeStage='{stageName}' age={F(age)}");
 
         IntVec3 cell;
         if (!CellFinder.TryFindRandomCellNear(map.Center, map, 30, c => c.Standable(map), out cell)) cell = map.Center;

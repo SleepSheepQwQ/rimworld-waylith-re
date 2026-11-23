@@ -101,12 +101,11 @@ def main():
             check(f"{sp}.control_is_complexui",
                   bool(d) and d["complex"] == "True" and d["matnull"] == "False",
                   f"{sp} material={d['mat'] if d else '?'} (must be CutoutComplexUI_*)")
+            check(f"{sp}.control_texture_present", bool(d) and d["texnull"] == "False",
+                  f"{sp} tex={d['tex'] if d else '?'} (a life stage without art makes the measurement vacuous)")
         d = icons.get("Squirrel")
         check("Squirrel.control_material_null", bool(d) and d["matnull"] == "True",
               "plain Cutout control must have no material")
-        d = icons.get("Rat")
-        check("Rat.control_texture_present", bool(d) and d["texnull"] == "False",
-              "the measurement is vacuous if the icon texture itself is missing")
 
     if scenario in ("glyphfix_only", "fake_observe", "fake_null_first", "fake_multi", "mitig_first", "mitig_last",
                     "mitig_min", "restore_min"):
