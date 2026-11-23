@@ -1,0 +1,56 @@
+name: devzh
+
+# Builds the developer-mode Chinese localisation mod and gates it against the shipped
+# Assembly-CSharp: the two patched methods must still exist, and every English key we translate
+# must really occur in the assembly (no invented labels).
+on:
+  push:
+    paths:
+      - 'devzh/**'
+      - '.github/workflows/devzh.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build mod
+        run: |
+          set -euo pipefail
+          dotnet build devzh/DevModeZh.csproj -c Release -v minimal
+          mkdir -p out
+          cp devzh/bin/Release/net10.0/DevModeZh.dll out/DevModeZh.dll
+          ls -l out/DevModeZh.dll
+
+      - name: Gate (static, against the shipped Assembly-CSharp)
+        run: dotnet run --project devzh/gate/Gate.csproj -c Release -- dlls/Assembly-CSharp.dll devzh/src/Dict.g.cs out/DevModeZh.dll
+
+      - name: Package mod
+        run: |
+          set -euo pipefail
+          STAGE=out/devzh
+          rm -rf "$STAGE"; mkdir -p "$STAGE/Assemblies"
+          cp -r devzh/About "$STAGE/About"
+          cp -r devzh/Languages "$STAGE/Languages"
+          cp out/DevModeZh.dll "$STAGE/Assemblies/DevModeZh.dll"
+          (cd out && zip -qr DevModeZh-1.0.0.zip devzh)
+          md5sum out/DevModeZh-1.0.0.zip
+          stat -c '%n %s bytes' out/DevModeZh-1.0.0.zip
+          find "$STAGE" -type f | sed 's/^/  /'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DevModeZh
+          path: |
+            out/DevModeZh-1.0.0.zip
+            out/DevModeZh.dll
