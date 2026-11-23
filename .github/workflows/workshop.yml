@@ -1,14 +1,20 @@
 name: workshop
 
-# Fetches one public Steam Workshop item for RimWorld and uploads it as an artifact.
-# Used for mods that have no GitHub mirror and cannot be downloaded from the workshop page directly.
+# Fetch public RimWorld workshop items with SteamCMD (anonymous), the way RimSort does it:
+#   steamcmd +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 +login anonymous
+#            +workshop_download_item 294100 <id> +quit
+# Uploads whatever SteamCMD produced plus its log.
 on:
   workflow_dispatch:
     inputs:
       item_id:
         description: 'Workshop item id'
         required: true
-        default: '3810048899'
+        default: '2142743468'
+      item_id_2:
+        description: 'Optional second item id'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -16,44 +22,58 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - name: Install steamcmd (official tarball, 32-bit runtime)
+      - name: Install steamcmd
         run: |
           set -euo pipefail
           sudo dpkg --add-architecture i386
           sudo apt-get update -qq
-          sudo apt-get install -y lib32gcc-s1 ca-certificates
+          sudo apt-get install -y lib32gcc-s1 lib32stdc++6 ca-certificates
           mkdir -p "$PWD/steamcmd"
           curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf - -C "$PWD/steamcmd"
-          "$PWD/steamcmd/steamcmd.sh" +quit || true
-          "$PWD/steamcmd/steamcmd.sh" +version || true
+          ls -l "$PWD/steamcmd"
 
-      - name: Download the item (anonymous)
+      - name: Bootstrap steamcmd (non-interactive, bounded)
         run: |
-          set -euo pipefail
-          ID="${{ github.event.inputs.item_id }}"
+          set -uo pipefail
+          timeout 420 "$PWD/steamcmd/steamcmd.sh" +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 +login anonymous +quit || echo "bootstrap exit=$?"
+          echo "--- steamcmd dir ---"
+          ls -la "$PWD/steamcmd/linux32" 2>/dev/null | head -5 || true
+
+      - name: Download items
+        run: |
+          set -uo pipefail
           mkdir -p out
-          "$PWD/steamcmd/steamcmd.sh" +force_install_dir "$PWD/out" \
-                   +login anonymous \
-                   +workshop_download_item 294100 "$ID" \
-                   +quit | tee out/steamcmd.log
-          ROOT="$HOME/.steam/steam/steamapps/workshop/content/294100/$ID"
-          if [ ! -d "$ROOT" ]; then
-            echo "::error::workshop content not found at $ROOT"
-            find "$HOME/.steam" -maxdepth 6 -type d -path '*workshop/content*' | head -20
-            exit 1
-          fi
-          echo "--- contents ---"
-          find "$ROOT" -maxdepth 2 | head -30
-          tar -C "$ROOT" -czf "out/workshop-$ID.tgz" .
-          ls -l "out/workshop-$ID.tgz"
+          for ID in "${{ github.event.inputs.item_id }}" "${{ github.event.inputs.item_id_2 }}"; do
+            [ -z "$ID" ] && continue
+            echo "=== downloading $ID ==="
+            timeout 600 "$PWD/steamcmd/steamcmd.sh" \
+              +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 \
+              +force_install_dir "$PWD/out" \
+              +login anonymous \
+              +workshop_download_item 294100 "$ID" validate \
+              +quit 2>&1 | tee "out/steamcmd-$ID.log"
+            ROOT="$HOME/.steam/steam/steamapps/workshop/content/294100/$ID"
+            ALT="$PWD/steamcmd/steamapps/workshop/content/294100/$ID"
+            echo "root=$ROOT exists=$([ -d "$ROOT" ] && echo yes || echo no)"
+            echo "alt=$ALT exists=$([ -d "$ALT" ] && echo yes || echo no)"
+            for d in "$ROOT" "$ALT"; do
+              if [ -d "$d" ]; then
+                echo "--- $d ---"
+                find "$d" -maxdepth 2 | head -20
+                tar -C "$d" -czf "out/workshop-$ID.tgz" .
+              fi
+            done
+          done
+          ls -l out
+          grep -hE "Success\. Downloaded|ERROR!|No subscription|Invalid" out/steamcmd-*.log | head -10 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: workshop-${{ github.event.inputs.item_id }}
+          name: workshop
           path: |
             out/workshop-*.tgz
-            out/steamcmd.log
+            out/steamcmd-*.log
           if-no-files-found: warn
