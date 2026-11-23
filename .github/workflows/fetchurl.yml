@@ -1,0 +1,48 @@
+name: fetchurl
+
+# One-off downloader: fetches a URL from the runner's network, prints the response headers and
+# the first bytes so we can tell a challenge page from a real archive, and uploads whatever it got.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to fetch'
+        required: true
+      referer:
+        description: 'Optional Referer header'
+        required: false
+        default: 'https://smods.ru/'
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+          curl -sSL --max-time 120 -A "$UA" -H "Referer: ${{ github.event.inputs.referer }}" \
+               -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
+               -H 'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8' \
+               -D out/headers.txt -o out/body.bin -w 'code=%{http_code} type=%{content_type} size=%{size_download} url=%{url_effective}\n' \
+               "${{ github.event.inputs.url }}" > out/result.txt || true
+          cat out/result.txt
+          echo '--- headers ---'
+          head -20 out/headers.txt || true
+          echo '--- first bytes ---'
+          head -c 400 out/body.bin | tr -d '\000' || true
+          echo
+          file out/body.bin || true
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fetched
+          path: out/
+          if-no-files-found: warn
