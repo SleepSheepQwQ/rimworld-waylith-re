@@ -1,0 +1,56 @@
+name: workshop
+
+# Fetches one public Steam Workshop item for RimWorld and uploads it as an artifact.
+# Used for mods that have no GitHub mirror and cannot be downloaded from the workshop page directly.
+on:
+  workflow_dispatch:
+    inputs:
+      item_id:
+        description: 'Workshop item id'
+        required: true
+        default: '3810048899'
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install steamcmd
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq steamcmd
+          steamcmd +quit || true
+
+      - name: Download the item (anonymous)
+        run: |
+          set -euo pipefail
+          ID="${{ github.event.inputs.item_id }}"
+          mkdir -p out
+          steamcmd +force_install_dir "$PWD/out" \
+                   +login anonymous \
+                   +workshop_download_item 294100 "$ID" \
+                   +quit | tee out/steamcmd.log
+          ROOT="$HOME/.steam/steam/steamapps/workshop/content/294100/$ID"
+          if [ ! -d "$ROOT" ]; then
+            echo "::error::workshop content not found at $ROOT"
+            find "$HOME/.steam" -maxdepth 6 -type d -path '*workshop/content*' | head -20
+            exit 1
+          fi
+          echo "--- contents ---"
+          find "$ROOT" -maxdepth 2 | head -30
+          tar -C "$ROOT" -czf "out/workshop-$ID.tgz" .
+          ls -l "out/workshop-$ID.tgz"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workshop-${{ github.event.inputs.item_id }}
+          path: |
+            out/workshop-*.tgz
+            out/steamcmd.log
+          if-no-files-found: warn
