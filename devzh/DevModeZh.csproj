@@ -24,4 +24,12 @@
     <PackageReference Include="Lib.Harmony" Version="2.3.3" PrivateAssets="all" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- compile against the real game assembly, never ship it -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>../dlls/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
 </Project>
