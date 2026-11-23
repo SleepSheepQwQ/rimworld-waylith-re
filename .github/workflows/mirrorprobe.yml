@@ -1,0 +1,39 @@
+name: mirrorprobe
+
+# Probes a list of workshop-mirror URLs from the runner network and reports which ones answer with
+# something other than a Cloudflare challenge. Used to find a downloadable copy of a 1.7 build.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Probe
+        run: |
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+          probe() {
+            url="$1"
+            out=$(curl -sSL --max-time 25 -A "$UA" -H 'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8' \
+                  -o /tmp/body -w '%{http_code} %{content_type} %{size_download}' "$url" 2>/dev/null || echo "000 - 0")
+            cf=$(grep -ci 'just a moment\|cf-mitigated' /tmp/body 2>/dev/null || true)
+            zip=$(head -c 4 /tmp/body 2>/dev/null | od -An -tx1 | tr -d ' \n')
+            echo "$out | cf=$cf | magic=$zip | $url"
+          }
+          for id in 2142743468 3810048899; do
+            echo "### item $id"
+            probe "https://steamworkshopdownloader.io/download/$id"
+            probe "https://steamworkshop.download/download/view/$id"
+            probe "https://www.steamworkshopdownloader.com/view/$id"
+            probe "https://smods.ru/archives/?s=$id"
+            probe "https://catalogue.smods.ru/?s=$id"
+            probe "https://rimworld.2game.info/detail.htm?id=$id"
+            probe "https://steamcommunity.com/sharedfiles/filedetails/?id=$id"
+            probe "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/?itemcount=1&publishedfileids[0]=$id"
+          done
+          echo "### archive.org"
+          probe "https://archive.org/advancedsearch.php?q=2142743468&fl%5B%5D=identifier&rows=5&output=json"
