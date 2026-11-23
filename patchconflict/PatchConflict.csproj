@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Startup hook (DOTNET_STARTUP_HOOKS) for .github/workflows/patchconflict.yml.
+
+    Runs inside the real headless host and answers one question: if another mod has already patched
+    Verse.Widgets.GetIconFor when GlyphFix installs, does GlyphFix's postfix still run and still
+    change the value the caller gets?
+
+    The fake mod is installed in Initialize(), i.e. before any mod assembly is loaded, so it is
+    literally "the mod that patched first". GlyphFix is installed later, by the probe invoking its
+    StaticConstructorOnStartup ctor exactly the way RimWorld's startup utility would.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>PatchConflict</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS0649;CS0169;CS8632;CS0618</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>../dlls/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityStubs"><HintPath>../dlls/UnityStubs.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Waylith"><HintPath>../dlls/Waylith.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>../dlls/0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

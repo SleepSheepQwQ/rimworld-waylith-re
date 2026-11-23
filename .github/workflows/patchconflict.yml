@@ -1,0 +1,157 @@
+name: patchconflict
+
+# OPEN-A of docs/LOADING-FACTS.md: can GlyphFix's postfix be silently disabled when another mod
+# patches the same Widgets.GetIconFor first?
+#
+# One real headless host per scenario. The fake mod is installed in the startup hook, i.e. before any
+# mod assembly is loaded (literally "patched first"); GlyphFix 2.7.7 is built from rel/2.7.7 and
+# installed afterwards by running its StaticConstructorOnStartup ctor, the way RimWorld does. Then a
+# real animal pawn is generated and spawned, and the real Widgets.GetIconFor(pawn, ...) return value
+# is read: GlyphFix 2.7.7 turns a CutoutComplexUI material into material=null, so that is the effect
+# being defended.
+#
+#   control_nogf      no GlyphFix          baseline: Rat/Ibex must come back CutoutComplexUI_*
+#   glyphfix_only     GlyphFix only        material must be null
+#   fake_observe      fake postfix, writes nothing
+#   fake_null_first   fake sets __result=null at Priority.First   -> GlyphFix should repair it
+#   fake_null_last    fake sets __result=null at Priority.Last    -> does it defeat GlyphFix?
+#   fake_multi        two fake ref __result postfixes + GlyphFix  -> three on one method
+#   mitig_first       GlyphFix build with Priority.First          -> against null_last
+#   mitig_last        GlyphFix build with Priority.Last           -> against null_last
+#
+# gate.py refuses to call a run green when the fake patch or the GlyphFix postfix is missing; the
+# ordering outcome itself is printed, not asserted, because it is the answer.
+
+on:
+  push:
+    paths:
+      - 'patchconflict/**'
+      - '.github/workflows/patchconflict.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patchconflict-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conflict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: GlyphFix 2.7.7 source (the released branch)
+        uses: actions/checkout@v4
+        with:
+          repository: SleepSheepQwQ/rimworld-waylith-icon-fix
+          ref: rel/2.7.7
+          path: iconfix
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+          dotnet --version
+          python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
+      - name: What is under test
+        run: |
+          set -euo pipefail
+          git -C iconfix log -1 --format='glyphfix sha=%H %s'
+          grep -o '<modVersion>[^<]*' iconfix/mod/About/About.xml
+          grep -n 'IsUnrenderableUiMaterial' iconfix/mod/Source/IconFallbackFix.cs | head -2
+          md5sum dlls/0Harmony.dll dlls/Assembly-CSharp.dll
+
+      - name: Build apphost, probe, and the three GlyphFix builds
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build patchconflict/PatchConflict.csproj -c Release -v minimal
+          python3 patchconflict/make_mitigated.py iconfix out
+          sha256sum out/GlyphFix-*.dll
+
+      - name: Assemble the game directory and the animal art
+        run: |
+          set -euo pipefail
+          bash ci/assemble.sh "$PWD/run"
+          python3 patchconflict/make_animal_art.py --resources "$PWD/run/RimWorld_Data/Resources"
+
+      - name: "control_nogf - the baseline the fix is measured against"
+        run: bash patchconflict/run_case.sh control_nogf off none
+
+      - name: "glyphfix_only - GlyphFix alone, no foreign postfix"
+        run: bash patchconflict/run_case.sh glyphfix_only off out/GlyphFix-stock.dll
+
+      - name: "fake_observe - a foreign ref __result postfix that writes nothing"
+        run: bash patchconflict/run_case.sh fake_observe observe out/GlyphFix-stock.dll
+
+      - name: "fake_null_first - foreign postfix nulls __result at Priority.First"
+        run: bash patchconflict/run_case.sh fake_null_first null_first out/GlyphFix-stock.dll
+
+      - name: "fake_null_last - foreign postfix nulls __result at Priority.Last"
+        run: bash patchconflict/run_case.sh fake_null_last null_last out/GlyphFix-stock.dll
+
+      - name: "fake_multi - two foreign ref __result postfixes, then GlyphFix"
+        run: bash patchconflict/run_case.sh fake_multi multi out/GlyphFix-stock.dll
+
+      - name: "mitig_first - GlyphFix postfix at Priority.First, same clobber"
+        run: bash patchconflict/run_case.sh mitig_first null_last out/GlyphFix-priofirst.dll
+
+      - name: "mitig_last - GlyphFix postfix at Priority.Last, same clobber"
+        run: bash patchconflict/run_case.sh mitig_last null_last out/GlyphFix-priolast.dll
+
+      - name: Gate every scenario
+        run: |
+          set -o pipefail
+          rc=0
+          for s in control_nogf glyphfix_only fake_observe fake_null_first fake_null_last fake_multi mitig_first mitig_last; do
+            echo "--- $s ---"
+            python3 patchconflict/gate.py "$s" "out/$s.log" | tee "out/gate-$s.txt" || rc=1
+          done
+          exit $rc
+
+      - name: Verdict
+        if: always()
+        run: |
+          set -o pipefail
+          python3 patchconflict/verdict.py out | tee out/verdict.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '### patch conflict: foreign postfix vs GlyphFix GetIconFor'
+            echo
+            echo '```'
+            cat out/verdict.txt 2>/dev/null || echo '(no verdict)'
+            echo
+            echo '--- GlyphFix-owned patch targets (runtime inventory) ---'
+            grep -ah 'glyphfix.target\|glyphfix.patched.total\|geticonfor ' out/glyphfix_only.txt 2>/dev/null || true
+            echo
+            echo '--- Harmony 3.x postfix semantics ---'
+            grep -ah 'synth\.' out/glyphfix_only.txt 2>/dev/null || true
+            echo
+            echo '--- GlyphFix install lines ---'
+            grep -ah 'iconfallback:\|patchreport: Widgets.GetIconFor' out/glyphfix_only.modlog.txt 2>/dev/null || true
+            echo
+            echo '--- Harmony/error lines in the conflict runs ---'
+            grep -ahiE 'harmony|patch.*(error|exception)|not patched' out/fake_*.log 2>/dev/null | head -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patchconflict-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
