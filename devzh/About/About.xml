@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>开发者模式汉化 (Dev Mode Chinese)</name>
+  <author>SleepSheep</author>
+  <packageId>sleepsheep.waylith.devzh</packageId>
+  <modVersion>1.0.0</modVersion>
+  <supportedVersions><li>1.7</li></supportedVersions>
+  <description>把开发者模式里那些写死在程序里的英文标签翻成中文。游戏自带的中文语言包覆盖不到它们，因为调试动作的名字是 Assembly-CSharp 里的字符串常量（DebugActionAttribute 的 name、DebugActionNode 的字面量标签、DebugActionCategories 的类别名）。本模组在标签真正显示出来的两个位置做替换：DebugActionNode.LabelNow（所有动作、子菜单项、工具名）和 Dialog_Debug.DoLabel（类别标题）。标签页名字走 DefInjected，无需代码。
+
+共 227 条：173 个调试动作、13 个类别、38 个固定标签、3 个标签页。带数字的动态标签（波次/等级/调用次数）按前缀翻译。没有配置项。
+
+译名尽量沿用社区习惯（小人、意识形态、殖民者）；如与你的用词习惯不同，直接改 Languages 下的 XML 与字典即可。</description>
+</ModMetaData>
