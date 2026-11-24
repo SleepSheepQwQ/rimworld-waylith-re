@@ -81,11 +81,14 @@ jobs:
           import sys
           path, version = sys.argv[1], sys.argv[2]
           data = open(path, "rb").read()
-          for marker in (f"BUILD {version} iconfallback", "shadowfix:"):
+          # The runtime BUILD line is composed from separate C# literals, so it is not guaranteed to
+          # exist contiguously in the UTF-16 user-string heap. Check the stable components here and
+          # assert the full runtime line later, after the mod has actually booted.
+          for marker in ("iconfallback+ddsformat", "atlasbake:", "shadowfix:"):
               encoded = marker.encode("utf-16-le")
               if encoded not in data:
                   raise SystemExit(f"built DLL does not carry {marker!r}")
-          print(f"BUILD {version} with shadowfix present")
+          print(f"version {version}: image repair modules present")
           PY
 
       - name: Unit tests (DDS shadow decision table)

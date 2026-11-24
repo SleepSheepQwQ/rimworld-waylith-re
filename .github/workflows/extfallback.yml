@@ -103,7 +103,7 @@ jobs:
           import sys
           path, version = sys.argv[1], sys.argv[2]
           data = open(path, "rb").read()
-          for marker in (f"BUILD {version} iconfallback",
+          for marker in ("iconfallback+ddsformat",
                          "extfallback: armed at ",
                          "extfallback: postfix on "):
               hit = marker.encode("utf-16-le") in data
