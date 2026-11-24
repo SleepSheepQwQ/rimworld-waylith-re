@@ -96,10 +96,14 @@ jobs:
 
           # .NET keeps user strings as UTF-16LE in the #US heap, so `strings -a` cannot see them on
           # every host. Search the bytes the way the runtime stores them.
-          python3 - "$DLL" <<'PY'
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' glyphfix/mod/AgentTouchFix.csproj)
+          test -n "$VERSION"
+          echo "GLYPHFIX_VERSION=$VERSION" >> "$GITHUB_ENV"
+          python3 - "$DLL" "$VERSION" <<'PY'
           import sys
-          data = open(sys.argv[1], "rb").read()
-          for marker in ("BUILD 2.6.6 ddsformat",
+          path, version = sys.argv[1], sys.argv[2]
+          data = open(path, "rb").read()
+          for marker in (f"BUILD {version} iconfallback",
                          "extfallback: armed at ",
                          "extfallback: postfix on "):
               hit = marker.encode("utf-16-le") in data

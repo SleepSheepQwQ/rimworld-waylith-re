@@ -74,7 +74,19 @@ jobs:
           test -f "$DLL"
           md5sum "$DLL" | tee out/dll-md5.txt
           stat -c '%n %s bytes' "$DLL" | tee -a out/dll-md5.txt
-          python3 -c "import sys; d=open('$DLL','rb').read(); n='BUILD 2.6.6 shadow'.encode('utf-16-le'); print('BUILD 2.6.6 shadow') if n in d else sys.exit('BUILD string missing from $DLL')" | tee out/dll-build.txt
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' glyphfix/mod/AgentTouchFix.csproj)
+          test -n "$VERSION"
+          echo "GLYPHFIX_VERSION=$VERSION" >> "$GITHUB_ENV"
+          python3 - "$DLL" "$VERSION" <<'PY' | tee out/dll-build.txt
+          import sys
+          path, version = sys.argv[1], sys.argv[2]
+          data = open(path, "rb").read()
+          for marker in (f"BUILD {version} iconfallback", "shadowfix:"):
+              encoded = marker.encode("utf-16-le")
+              if encoded not in data:
+                  raise SystemExit(f"built DLL does not carry {marker!r}")
+          print(f"BUILD {version} with shadowfix present")
+          PY
 
       - name: Unit tests (DDS shadow decision table)
         run: dotnet test glyphfix/tests/TexSt/TexSt.csproj -c Release -v minimal
@@ -123,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import re, sys
+          import os, re, sys
 
           def parse(path):
               text = open(path, encoding="utf-8", errors="replace").read()
@@ -209,8 +221,9 @@ jobs:
                   fail("mod log missing: " + needle)
           if "'Things/ShadowProbe/Dxt3' rescued" in b_text:
               fail("the repair restored a key that has no image fallback (Dxt3) - it must not")
-          if "BUILD 2.6.6 shadow" not in b_text:
-              fail("the tested DLL did not report BUILD 2.6.6 shadow")
+          expected_build = f"BUILD {os.environ['GLYPHFIX_VERSION']}"
+          if expected_build not in b_text or "shadowfix:" not in b_text:
+              fail(f"the tested DLL did not report {expected_build} with shadowfix")
 
           if problems:
               print("\n%d check(s) failed" % len(problems))

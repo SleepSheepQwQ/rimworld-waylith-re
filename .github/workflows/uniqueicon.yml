@@ -7,8 +7,8 @@ name: uniqueicon
 #                                  CutoutComplex                      -> expect 5 variants / 0 masks
 #   UniqueRevolverFixtureLeak      the same bytes named .png.dds / _m.png.dds (the shipped shape)
 #                                                                     -> expect 10 / 5
-#   UniqueRevolverFixtureDx10      the same leak, masks behind a DX10 header (shipped _m is 11084 B
-#                                  = DX10 header + a BC1-sized chain)   -> expect 10 / 5, and blank
+#   UniqueRevolverFixtureDx10      the same leak, masks behind a DX10 BC4 header (shipped _m is
+#                                  11084 B = DX10 header + a BC4 chain) -> expect 10 / 5, and blank
 #
 # Per def the probe prints Graphic type, subGraphics names, the per-instance pick
 # (thingIDNumber % n), uiIcon (null / BadTex / texture), uiIconMaterial (shader + GetPropertyCount),
@@ -19,6 +19,11 @@ on:
       - 'uniqueicon/**'
       - '.github/workflows/uniqueicon.yml'
   workflow_dispatch:
+    inputs:
+      glyphfix_ref:
+        description: 'rimworld-waylith-icon-fix ref to test in the positive job'
+        required: false
+        default: 'main'
 
 permissions:
   contents: read
@@ -103,4 +108,97 @@ jobs:
             out/summary.txt
             out/fixture.txt
             out/assemble.log
+          if-no-files-found: warn
+
+  fixed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: SleepSheepQwQ/rimworld-waylith-icon-fix
+          ref: ${{ github.event.inputs.glyphfix_ref || 'main' }}
+          path: glyphfix
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Texture tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libstb-dev
+          python3 -m pip install --break-system-packages --quiet pillow
+
+      - name: Build apphost, probe and GlyphFix
+        run: |
+          set -euo pipefail
+          dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
+          dotnet build uniqueicon/UniqueIconProbe.csproj -c Release -v minimal
+          dotnet build glyphfix/mod/AgentTouchFix.csproj -c Release -v minimal
+          DLL=glyphfix/mod/bin/Release/net10.0/GlyphFix.dll
+          test -f "$DLL"
+          md5sum "$DLL" | tee out-dll-md5.txt
+
+      - name: Assemble fixture and install GlyphFix
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash ci/assemble.sh "$PWD/run" > out/assemble.log 2>&1
+          python3 uniqueicon/make_fixture.py --run "$PWD/run" --verify | tee out/fixture.txt
+
+          mkdir -p run/Mods/glyphfix/About run/Mods/glyphfix/Assemblies
+          cp glyphfix/mod/About/About.xml run/Mods/glyphfix/About/
+          cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll run/Mods/glyphfix/Assemblies/
+
+          python3 - "$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml" <<'PY'
+          import sys
+          path = sys.argv[1]
+          text = open(path, encoding="utf-8").read()
+          text = text.replace(
+              "<li>ludeon.rimworld.odyssey</li>",
+              "<li>ludeon.rimworld.odyssey</li>\n"
+              "    <li>waylith.uniqueiconfixture</li>\n"
+              "    <li>sleepsheep.waylith.glyphfix</li>",
+          )
+          open(path, "w", encoding="utf-8").write(text)
+          print(text)
+          PY
+
+      - name: Measure the patched layouts
+        run: |
+          set -euo pipefail
+          export DOTNET_STARTUP_HOOKS="$PWD/uniqueicon/bin/Release/net10.0/UniqueIconProbe.dll"
+          export PROBE_TIMEOUT_MS=300000
+          export UNIQ_DEFS="Gun_Revolver_Unique,UniqueRevolverFixturePlain,UniqueRevolverFixtureLeak,UniqueRevolverFixtureDx10"
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces > "$PWD/../out/probe.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[UNIQ\]|^\[AgentTouchFix\]' "$PWD/../out/probe.log" | tee "$PWD/../out/uniq.txt" || true
+
+      - name: Gate the fixed layouts
+        run: |
+          set -euo pipefail
+          python3 uniqueicon/gate_fixed.py out/uniq.txt out/probe.log | tee out/summary.txt
+          {
+            echo '```'
+            cat out/summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uniqueicon-fixed-${{ github.run_id }}
+          path: |
+            out/probe.log
+            out/uniq.txt
+            out/summary.txt
+            out/fixture.txt
+            out/assemble.log
+            out-dll-md5.txt
+            run/Mods/glyphfix/Assemblies/GlyphFix.dll
           if-no-files-found: warn

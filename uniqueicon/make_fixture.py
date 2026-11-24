@@ -6,12 +6,12 @@ Three texture layouts, one XML def each, so the naming variable is isolated:
   UniqueIconPlain   UniqueRevolverA.dds        ...E.dds    + ...E_m.dds      (healthy layout)
   UniqueIconLeak    UniqueRevolverA.png.dds    ...E.png.dds + ..._m.png.dds  (the shipped leak)
   UniqueIconDx10    UniqueRevolverA.png.dds    ...E.png.dds + ..._m.png.dds  (mask with the
-                                                                             shipped DX10 header)
+                                                                             shipped DX10 BC4 header)
 
 All three carry the same 128x128 BC1 art with a full 8-level mip chain (a 1-mip BC1 file goes
 transparent the moment it is drawn smaller than native - that defect must not be confused with
-the naming one).  The `_m` files are flat grey, i.e. what a mask looks like when it is drawn as
-an icon.  Only the file names differ, which is exactly the variable under test.
+the naming one). The DX10 layout's `_m` files are BC4_UNORM with the same full chain, matching the
+shipped masks; the other masks are flat grey BC1 control data.
 
 Every file is re-read here before the run: header fields and, when Pillow is available, the
 decoded size and a sampled texel.  A fixture that fails its own control read must never be used
@@ -59,16 +59,35 @@ def level_bytes(w, h, colour):
     return bytes(out)
 
 
-def dds(w, h, colour, dxgi=None):
-    """BC1 (or DX10+BC1 blocks) DDS with the full mip chain, correct linear size and mip count."""
+def bc4_block(shade):
+    """One BC4 block: a0=shade, a1=0, every 3-bit texel index 0 -> shade."""
+    return bytes((shade, 0)) + b"\x00" * 6
+
+
+def bc4_level_bytes(w, h, colour):
+    blocks_x, blocks_y = max(1, (w + 3) // 4), max(1, (h + 3) // 4)
+    out = bytearray()
+    for by in range(blocks_y):
+        for bx in range(blocks_x):
+            out += bc4_block(colour(bx, by))
+    return bytes(out)
+
+
+def dds(w, h, colour, dxgi=None, codec="bc1"):
+    """BC1/BC4 (optionally behind DX10) DDS with a full mip chain and exact payload size."""
     mips = []
     mw, mh = w, h
     while True:
-        mips.append(level_bytes(mw, mh, colour))
+        level = bc4_level_bytes if codec == "bc4" else level_bytes
+        mips.append(level(mw, mh, colour))
         if mw == 1 and mh == 1:
             break
         mw, mh = max(1, mw // 2), max(1, mh // 2)
 
+    if codec not in ("bc1", "bc4"):
+        raise ValueError(f"unsupported fixture codec: {codec}")
+    if codec == "bc4" and dxgi is None:
+        raise ValueError("BC4 fixtures use the DX10 header (there is no portable legacy FourCC)")
     fourcc = b"DX10" if dxgi is not None else b"DXT1"
     flags = 0x1 | 0x2 | 0x4 | 0x1000 | 0x80000          # CAPS|HEIGHT|WIDTH|PIXELFORMAT|LINEARSIZE
     hdr = struct.pack("<4sIIIIIII", b"DDS ", 124, flags, h, w, len(mips[0]), 0, len(mips))
@@ -111,6 +130,28 @@ def bc1_sample(data, skip, w, x, y):
     return rgb + ((0,) if (c0 <= c1 and idx == 3) else (255,))
 
 
+def bc4_sample(data, skip, w, x, y):
+    """Independent BC4 decode of one texel. Index 0 selects endpoint a0."""
+    blocks_per_row = max(1, (w + 3) // 4)
+    block = skip + ((y // 4) * blocks_per_row + (x // 4)) * 8
+    a0, a1 = data[block], data[block + 1]
+    bits = int.from_bytes(data[block + 2:block + 8], "little")
+    idx = (bits >> (3 * ((y % 4) * 4 + (x % 4)))) & 0x7
+    if idx == 0:
+        return a0, a0, a0, 255
+    if idx == 1:
+        return a1, a1, a1, 255
+    if a0 > a1:
+        value = ((7 - idx) * a0 + idx * a1) // 7
+    elif idx == 6:
+        value = 0
+    elif idx == 7:
+        value = 255
+    else:
+        value = ((5 - idx) * a0 + idx * a1) // 5
+    return value, value, value, 255
+
+
 def verify(path, want_w=128, want_h=128):
     data = path.read_bytes()
     hdr = read_header(data)
@@ -141,13 +182,16 @@ def verify(path, want_w=128, want_h=128):
     except Exception as exc:                                  # noqa: BLE001 - report, never hide
         problems.append(f"pillow {type(exc).__name__}: {exc}")
 
-    bc1 = bc1_sample(data, hdr["header"], hdr["w"], want_w // 2, want_h // 2)
-    if max(bc1[:3]) == 0:
-        problems.append(f"bc1 sample is black {bc1}")
+    is_bc4 = hdr["dxgi"] == 80
+    sample_fn = bc4_sample if is_bc4 else bc1_sample
+    codec = "bc4" if is_bc4 else "bc1"
+    decoded = sample_fn(data, hdr["header"], hdr["w"], want_w // 2, want_h // 2)
+    if max(decoded[:3]) == 0:
+        problems.append(f"{codec} sample is black {decoded}")
     if sample is None:
-        sample = bc1
-    elif max(abs(a - b) for a, b in zip(sample[:3], bc1[:3])) > 2:
-        problems.append(f"pillow {sample[:3]} != bc1 {bc1[:3]}")
+        sample = decoded
+    elif max(abs(a - b) for a, b in zip(sample[:3], decoded[:3])) > 2:
+        problems.append(f"pillow {sample[:3]} != {codec} {decoded[:3]}")
     return hdr, sample, problems
 
 
@@ -203,7 +247,8 @@ def main():
 
     art, mips = dds(128, 128, art_rgb)
     mask, _ = dds(128, 128, mask_rgb)
-    mask_dx10, _ = dds(128, 128, mask_rgb, dxgi=72)   # BC1_UNORM_SRGB behind a DX10 header
+    mask_dx10, _ = dds(128, 128, lambda bx, by: 128 if (bx + by) % 7 else 144,
+                       dxgi=80, codec="bc4")           # the shipped shape: DX10 BC4_UNORM
 
     written = []
 
