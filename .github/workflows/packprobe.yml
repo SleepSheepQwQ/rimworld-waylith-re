@@ -62,6 +62,7 @@ jobs:
       - name: Build apphost + probe + GlyphFix
         run: |
           set -euo pipefail
+          mkdir -p out
           dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
           dotnet build packprobe/PackProbe.csproj -c Release -v minimal
           dotnet build glyphfix/mod/AgentTouchFix.csproj -c Release -v minimal
