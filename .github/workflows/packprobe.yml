@@ -85,7 +85,23 @@ jobs:
           mkdir -p "$PWD/run/Mods/glyphfix/About" "$PWD/run/Mods/glyphfix/Assemblies"
           cp glyphfix/mod/About/About.xml "$PWD/run/Mods/glyphfix/About/"
           cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll "$PWD/run/Mods/glyphfix/Assemblies/"
+          ls -l "$PWD/run/Assets.zip" "$PWD/run/Data/Odyssey/Assets.zip"
 
+      - name: A) control without GlyphFix
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          export PROBE_TIMEOUT_MS=180000
+          export DOTNET_STARTUP_HOOKS="$PWD/packprobe/bin/Release/net10.0/PackProbe.dll"
+          cd "$PWD/run"
+          ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces -Verbose > "$PWD/../out/control.log" 2>&1 || echo "exit=$?"
+          grep -aE '^\[VFS\]|^\[AgentTouchFix\]' "$PWD/../out/control.log" > "$PWD/../out/control.txt" || true
+
+      - name: B) enable GlyphFix and probe
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          OUT="$PWD/out"
           CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
           python3 - "$CFG/ModsConfig.xml" <<'PY'
           import sys
@@ -97,13 +113,6 @@ jobs:
           open(path, "w", encoding="utf-8").write(text)
           print(text)
           PY
-          ls -l "$PWD/run/Assets.zip" "$PWD/run/Data/Odyssey/Assets.zip"
-
-      - name: Probe the packs
-        timeout-minutes: 6
-        run: |
-          set -euo pipefail
-          OUT="$PWD/out"
           export PROBE_TIMEOUT_MS=180000
           export DOTNET_STARTUP_HOOKS="$PWD/packprobe/bin/Release/net10.0/PackProbe.dll"
           cd "$PWD/run"
@@ -115,7 +124,7 @@ jobs:
       - name: Gate
         run: |
           set -euo pipefail
-          python3 packprobe/gate.py out/vfs.txt | tee out/gate.txt
+          python3 packprobe/gate.py out/control.txt out/vfs.txt | tee out/gate.txt
 
       - name: Upload
         if: always()
@@ -125,4 +134,6 @@ jobs:
           path: |
             out/vfs.log
             out/vfs.txt
+            out/control.log
+            out/control.txt
           if-no-files-found: warn
