@@ -107,14 +107,6 @@ jobs:
           cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll run/Mods/glyphfix/Assemblies/
           md5sum run/Mods/glyphfix/Assemblies/GlyphFix.dll | tee out/dll-md5-installed.txt
 
-          # This workflow isolates the PNG-fallback layer. In a player install DdsPrefixAlt repairs
-          # DXT3 first and correctly lets the DDS win; to test ShadowFix itself, disable both DDS
-          # repair modules with their shipped switch files.
-          SW=/data/data/com.ports1de.waylith/files/game
-          sudo mkdir -p "$SW"
-          printf 'off\n' | sudo tee "$SW/agenttouchfix.dds" >/dev/null
-          printf 'off\n' | sudo tee "$SW/agenttouchfix.ddsalt" >/dev/null
-
           ls -R run/Mods/ShadowProbe | head -40
 
       - name: "A) control: texture pack without GlyphFix"
