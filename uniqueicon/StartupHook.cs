@@ -196,6 +196,19 @@ internal static class StartupHook
                               + $" fmt={(t == null ? "-" : t.format.ToString())} px={Px(t)}");
         }
 
+        // The player's table/build-menu path enters Widgets.ThingIcon, not GetIconFor(Def) directly.
+        // IconFieldFix runs in ThingIcon's prefix, so measuring the pre-existing uiIcon without this
+        // call creates a false negative even when the draw-time repair is working.
+        if (Environment.GetEnvironmentVariable("UNIQ_DRAW_PATH") == "1")
+        {
+            string drawErr = null;
+            try { Widgets.ThingIcon(new Rect(0f, 0f, 128f, 128f), def); }
+            catch (Exception e) { drawErr = e.GetType().Name + ": " + One(e.Message); }
+            Console.WriteLine($"{T} def={defName} drawPath=ThingIcon(Def) err={(drawErr ?? "-")}"
+                              + $" uiIconNow='{(def.uiIcon == null ? "<null>" : def.uiIcon.name)}'"
+                              + $" materialNow='{(def.uiIconMaterial == null ? "<null>" : def.uiIconMaterial.name)}'");
+        }
+
         // ResolveIcon's two outputs.
         Texture2D ui = def.uiIcon;
         bool uiNull = ui == null;
