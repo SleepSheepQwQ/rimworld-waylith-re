@@ -94,6 +94,12 @@ def main(uniq_path, probe_log):
 
     expect("startup ctor invoked (harness emulation)" in log,
            "GlyphFix startup constructor was not invoked")
+    expect("BUILD 2.7.8" in log, "the tested DLL did not report GlyphFix 2.7.8")
+    expect("drawfix: patched" in log, "IconFieldFix did not patch the icon draw paths")
+    expect("GetIconFor(ThingDef, ...) overload" in log,
+           "IconFieldFix did not patch direct GetIconFor(ThingDef) callers")
+    expect("collection: existing graphic scan" in log,
+           "prebuilt Graphic_Collection objects were not swept")
     expect("ddsalt: armed" in log, "DdsPrefixAlt never armed")
     expect("ddsalt: repaired" in log, "no DX10 BC4 texture was repaired")
 
