@@ -80,6 +80,11 @@ jobs:
           # requested as "<DataPath>/Resources/Textures/...". ci/assemble.sh builds the Unity data
           # dir instead; give the pack path a matching tree.
           cp -a "$PWD/run/RimWorld_Data/Resources" "$PWD/run/Resources"
+          # The headless subset also carries loose UniqueWeapons PNG/mask files used by other icon
+          # tests. ContentFinder would prefer those over the pack entries, making both A/B runs look
+          # fixed. Remove only this folder so this gate exercises Odyssey/Assets.zip exclusively.
+          LOOSE_UNIQUE="Textures/Things/Item/Equipment/WeaponRanged/UniqueWeapons"
+          rm -rf "$PWD/run/RimWorld_Data/Resources/$LOOSE_UNIQUE" "$PWD/run/Resources/$LOOSE_UNIQUE"
           mkdir -p "$PWD/run/Data/Odyssey"
           cp packprobe/pack/Odyssey.zip "$PWD/run/Data/Odyssey/Assets.zip"
           mkdir -p "$PWD/run/Mods/glyphfix/About" "$PWD/run/Mods/glyphfix/Assemblies"
