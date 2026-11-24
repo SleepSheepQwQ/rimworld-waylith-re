@@ -1090,7 +1090,11 @@ namespace AtlasFix
                 object hm = Activator.CreateInstance(hmType,
                     new object[] { typeof(Program).GetMethod(nameof(AfterBakeSentinel),
                         BindingFlags.Static | BindingFlags.NonPublic) });
-                R.Set(hm, "priority", Enum.Parse(prioType, "First"));
+                var firstField = prioType.GetField("First", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                object first = firstField != null
+                    ? firstField.GetValue(null)
+                    : prioType.IsEnum ? Enum.Parse(prioType, "First") : (object)800;
+                R.Set(hm, "priority", first);
 
                 var patch = htype.GetMethods().First(x =>
                 {
