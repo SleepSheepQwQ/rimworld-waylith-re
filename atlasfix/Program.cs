@@ -8,10 +8,10 @@
 //   [REAL]  a value produced by executing a shipped method (reflection)
 //   [GPU]   a value read back from a real Vulkan device (llvmpipe in CI); absent without a device
 //
-// With --gpu the same run also creates a real graphics device (GLFW window surface + lavapipe), so
-// the blits are real: the atlas page is read back and each tile's cell is counted. Without it the
-// device-less environment makes every texture non-resident, which is only useful as the negative
-// control ("nothing can be baked"); the positive control needs --gpu.
+// The default no-device run uses a Priority.First harness postfix to install sentinel GpuResources
+// on the atlas page and live source after the shipped Bake returns. GlyphFix's Low-priority postfix
+// then faces a discriminating input: live resident, dead not. With --gpu the same run additionally
+// performs real Vulkan blits, page readback, and per-cell pixel counts.
 //
 // usage: AtlasFix --dlls <dir> [--mod <GlyphFix.dll>] [--gpu] [--out <summary.md>]
 
@@ -242,6 +242,7 @@ namespace AtlasFix
     static class Program
     {
         static Type _tex2d, _atlas, _groupMut, _keyMut, _groupKey, _gpuSvc, _graphic, _matPool, _matReq;
+        static bool _sentinelInstalled, _sentinelPageResident;
         static int Main(string[] argv)
         {
             string dlls = Argv(argv, "--dlls") ?? "dlls";
@@ -285,12 +286,24 @@ namespace AtlasFix
             InstallMipNoOp();
             var facts = Measure(gpuReady);
             _facts = facts;
+            if (!gpuReady)
+            {
+                bool sentinel = InstallSentinelPostfix();
+                P.Ok("no-device sentinel postfix installed", sentinel,
+                     sentinel ? "Priority.First page + live residency" : "patch refused");
+            }
 
             // ---------------------------------------------------------------- control: no patch
             P.L();
             P.L("## 1. Control — the shipped Bake, no patch installed");
             P.L();
             var a1 = BakeAtlas("control", facts, gpuReady);
+            if (!gpuReady)
+            {
+                P.Ok("the fixture is discriminating after Bake (sentinel live resident, dead not)",
+                    facts.LiveResident && !facts.DeadResident,
+                    "page=" + _sentinelPageResident + " live=" + facts.LiveResident + " dead=" + facts.DeadResident);
+            }
 
             P.L();
             P.L("## 2. Control — what the graphic does with that tile");
@@ -371,7 +384,12 @@ namespace AtlasFix
                 }
                 else
                 {
-                    P.Skip("patched: positive control (resident texture kept)", "needs a device; without one every texture is non-resident and the patch correctly drops all of them");
+                    P.Ok("patched: sentinel-resident texture is still registered and still hits",
+                        _sentinelPageResident && a2 != null && a2.LiveInTiles && harm2 != null && harm2.Live,
+                        a2 == null ? "bake failed" : "page=" + _sentinelPageResident
+                        + " inTiles=" + a2.LiveInTiles + " hit=" + (harm2?.Live ?? false));
+                    P.Skip("patched: resident texture pixels",
+                           "sentinel verifies atlas bookkeeping, not the Vulkan blit");
                 }
             }
 
@@ -482,9 +500,9 @@ namespace AtlasFix
                    + " SourcePath=" + (SourcePath(f.Dead) ?? "null") + " GpuResource=" + Gpu(f.Dead)
                    + " -> EnsureGpuResident()=" + f.DeadResident);
             if (f.LiveResident && !f.DeadResident)
-                P.Ok("the fixture is discriminating (live resident, dead not)", true, "live=true dead=false");
+                P.Ok("the fixture is discriminating before Bake", true, "live=true dead=false");
             else if (!gpuReady)
-                P.Skip("fixture discrimination", "no device in this run: nothing is resident, so the positive half cannot be exercised");
+                P.Note("pre-Bake residency is not discriminating without a device; the sentinel postfix runs after Bake");
             else
                 P.Ok("the fixture is discriminating (live resident, dead not)", false,
                      "live=" + f.LiveResident + " dead=" + f.DeadResident);
@@ -1043,6 +1061,107 @@ namespace AtlasFix
         }
 
         // ------------------------------------------------------------------ misc
+
+        /// <summary>
+        /// No-device positive control. The shipped Bake still runs unchanged. This harness postfix
+        /// runs first (Priority.First), after the page has been created and before GlyphFix's Low
+        /// postfix: it gives the atlas page and live source a sentinel GpuResource, while the dead
+        /// source stays non-resident. GlyphFix must therefore keep live and drop only dead.
+        /// </summary>
+        static bool InstallSentinelPostfix()
+        {
+            if (_sentinelInstalled) return true;
+            try
+            {
+                if (Engine.Harmony == null)
+                {
+                    P.Note("sentinel postfix: 0Harmony not loaded");
+                    return false;
+                }
+
+                var bake = _atlas.GetMethod("Bake", BindingFlags.Public | BindingFlags.Instance,
+                                            null, new[] { typeof(bool) }, null);
+                var htype = Engine.Harmony.GetType("HarmonyLib.Harmony");
+                var hmType = Engine.Harmony.GetType("HarmonyLib.HarmonyMethod");
+                var prioType = Engine.Harmony.GetType("HarmonyLib.Priority");
+                if (bake == null || htype == null || hmType == null || prioType == null) return false;
+
+                object h = Activator.CreateInstance(htype, new object[] { "atlasfix.harness.sentinel" });
+                object hm = Activator.CreateInstance(hmType,
+                    new object[] { typeof(Program).GetMethod(nameof(AfterBakeSentinel),
+                        BindingFlags.Static | BindingFlags.NonPublic) });
+                R.Set(hm, "priority", Enum.Parse(prioType, "First"));
+
+                var patch = htype.GetMethods().First(x =>
+                {
+                    if (x.Name != "Patch") return false;
+                    var ps = x.GetParameters();
+                    return ps.Length >= 2 && typeof(MethodBase).IsAssignableFrom(ps[0].ParameterType)
+                           && ps.Any(p => p.Name == "postfix");
+                });
+                var parameters = patch.GetParameters();
+                var args = new object[parameters.Length];
+                args[0] = bake;
+                for (int i = 1; i < parameters.Length; i++)
+                    if (parameters[i].Name == "postfix") args[i] = hm;
+                patch.Invoke(h, args);
+                _sentinelInstalled = true;
+                P.Fact("harness instrumentation: no-device sentinel postfix is Priority.First");
+                return true;
+            }
+            catch (Exception e)
+            {
+                P.Note("sentinel postfix install: " + Ex(e));
+                return false;
+            }
+        }
+
+        static void AfterBakeSentinel(object __instance)
+        {
+            if (_facts == null) return;
+            try
+            {
+                object page = R.Get(__instance, "ColorTexture");
+                _sentinelPageResident = ForceResident(page, "atlas page");
+                _facts.LiveResident = ForceResident(_facts.Live, "live source");
+                _facts.DeadResident = Resident(_facts.Dead);
+                P.Real("sentinel after Bake: page=" + _sentinelPageResident
+                       + " live=" + _facts.LiveResident + " dead=" + _facts.DeadResident);
+            }
+            catch (Exception e) { P.Note("sentinel after Bake: " + Ex(e)); }
+        }
+
+        static bool ForceResident(object texture, string label)
+        {
+            try
+            {
+                object core = R.Get(texture, "CoreTexture");
+                if (core == null) return false;
+                var member = core.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                  .FirstOrDefault(p => p.Name == "GpuResource" && p.GetIndexParameters().Length == 0);
+                Type resourceType = member?.PropertyType;
+                if (resourceType == null)
+                {
+                    var field = core.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                       .FirstOrDefault(f => f.Name == "GpuResource");
+                    resourceType = field?.FieldType;
+                }
+                if (resourceType == null) return false;
+
+                object sentinel = resourceType.IsValueType
+                    ? Activator.CreateInstance(resourceType)
+                    : RuntimeHelpers.GetUninitializedObject(resourceType);
+                R.Set(core, "GpuResource", sentinel);
+                bool ok = Resident(texture);
+                P.Real("sentinel " + label + ": GpuResource=present EnsureGpuResident=" + ok);
+                return ok;
+            }
+            catch (Exception e)
+            {
+                P.Note("sentinel " + label + ": " + Ex(e));
+                return false;
+            }
+        }
 
         /// <summary>
         /// Harness instrumentation, not part of the fix: BlitTexturesToColorAtlas ends with
