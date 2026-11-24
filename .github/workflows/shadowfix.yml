@@ -107,6 +107,14 @@ jobs:
           cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll run/Mods/glyphfix/Assemblies/
           md5sum run/Mods/glyphfix/Assemblies/GlyphFix.dll | tee out/dll-md5-installed.txt
 
+          # This workflow isolates the PNG-fallback layer. In a player install DdsPrefixAlt repairs
+          # DXT3 first and correctly lets the DDS win; to test ShadowFix itself, disable both DDS
+          # repair modules with their shipped switch files.
+          SW=/data/data/com.ports1de.waylith/files/game
+          sudo mkdir -p "$SW"
+          printf 'off\n' | sudo tee "$SW/agenttouchfix.dds" >/dev/null
+          printf 'off\n' | sudo tee "$SW/agenttouchfix.ddsalt" >/dev/null
+
           ls -R run/Mods/ShadowProbe | head -40
 
       - name: "A) control: texture pack without GlyphFix"
@@ -124,6 +132,15 @@ jobs:
       - name: "B) same pack with GlyphFix (loaded last)"
         run: |
           set -euo pipefail
+          # This workflow isolates ShadowFix. DdsPrefixAlt/DdsFormatFix deliberately make the DXT3
+          # fixture decodable, in which case the engine's normal "same-name DDS wins" rule is correct
+          # and the PNG fallback is not supposed to run. Turn both DDS modules off for this A/B test;
+          # their integration with the shadow guard is covered by ddsprefix/ddsfix.
+          SW=/data/data/com.ports1de.waylith/files/game
+          sudo mkdir -p "$SW"
+          printf 'off\n' | sudo tee "$SW/agenttouchfix.dds" >/dev/null
+          printf 'off\n' | sudo tee "$SW/agenttouchfix.ddsalt" >/dev/null
+
           CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
           sed 's#<li>waylith.shadowprobe</li>#<li>waylith.shadowprobe</li>\n    <li>sleepsheep.waylith.glyphfix</li>#' \
               shadowfix/ModsConfig.shadow.xml > "$CFG/ModsConfig.xml"
@@ -219,7 +236,9 @@ jobs:
           # ---- the log has to show the decision and the module, not just the outcome
           for needle in ("shadowfix: dds shadow guard armed",
                          "shadowfix: rescued 'Things/ShadowProbe/Shadow' from 'Shadow.png'",
-                         "shadowfix: post-load repair done"):
+                         "shadowfix: post-load repair done",
+                         "ddsalt: disabled by",
+                         "ddsfix: disabled by"):
               if needle not in b_text:
                   fail("mod log missing: " + needle)
           if "'Things/ShadowProbe/Dxt3' rescued" in b_text:
