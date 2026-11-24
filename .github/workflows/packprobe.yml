@@ -22,6 +22,11 @@ on:
       - 'natives/**'
       - '.github/workflows/packprobe.yml'
   workflow_dispatch:
+    inputs:
+      glyphfix_ref:
+        description: 'rimworld-waylith-icon-fix ref to build'
+        required: false
+        default: 'work/2.7.8-complete'
 
 permissions:
   contents: read
@@ -37,6 +42,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/checkout@v4
+        with:
+          repository: SleepSheepQwQ/rimworld-waylith-icon-fix
+          ref: ${{ github.event.inputs.glyphfix_ref || 'work/2.7.8-complete' }}
+          path: glyphfix
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -48,11 +59,13 @@ jobs:
           sudo apt-get install -y -qq libstb-dev
           python3 -m pip install --break-system-packages --quiet pillow
 
-      - name: Build apphost + probe
+      - name: Build apphost + probe + GlyphFix
         run: |
           set -euo pipefail
           dotnet build ci/apphost/RimWorld.csproj -c Release -v minimal
           dotnet build packprobe/PackProbe.csproj -c Release -v minimal
+          dotnet build glyphfix/mod/AgentTouchFix.csproj -c Release -v minimal
+          md5sum glyphfix/mod/bin/Release/net10.0/GlyphFix.dll | tee out/dll-md5.txt
 
       - name: Assemble the game directory, then drop the real packs in
         run: |
@@ -68,6 +81,21 @@ jobs:
           cp -a "$PWD/run/RimWorld_Data/Resources" "$PWD/run/Resources"
           mkdir -p "$PWD/run/Data/Odyssey"
           cp packprobe/pack/Odyssey.zip "$PWD/run/Data/Odyssey/Assets.zip"
+          mkdir -p "$PWD/run/Mods/glyphfix/About" "$PWD/run/Mods/glyphfix/Assemblies"
+          cp glyphfix/mod/About/About.xml "$PWD/run/Mods/glyphfix/About/"
+          cp glyphfix/mod/bin/Release/net10.0/GlyphFix.dll "$PWD/run/Mods/glyphfix/Assemblies/"
+
+          CFG="$HOME/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config"
+          python3 - "$CFG/ModsConfig.xml" <<'PY'
+          import sys
+          path = sys.argv[1]
+          text = open(path, encoding="utf-8").read()
+          if "sleepsheep.waylith.glyphfix" not in text:
+              text = text.replace("</activeMods>",
+                                  "  <li>sleepsheep.waylith.glyphfix</li>\n  </activeMods>")
+          open(path, "w", encoding="utf-8").write(text)
+          print(text)
+          PY
           ls -l "$PWD/run/Assets.zip" "$PWD/run/Data/Odyssey/Assets.zip"
 
       - name: Probe the packs
@@ -79,9 +107,14 @@ jobs:
           export DOTNET_STARTUP_HOOKS="$PWD/packprobe/bin/Release/net10.0/PackProbe.dll"
           cd "$PWD/run"
           ./RimWorld -Headless -SuppressUnityStubs -DisableLogStackTraces -Verbose > "$OUT/vfs.log" 2>&1 || echo "exit=$?"
-          grep -aE '^\[VFS\]' "$OUT/vfs.log" | tee "$OUT/vfs.txt" || true
+          grep -aE '^\[VFS\]|^\[AgentTouchFix\]' "$OUT/vfs.log" | tee "$OUT/vfs.txt" || true
           echo "--- boot markers ---"
           grep -aiE 'asset pack|initialize finished|ModsConfig' "$OUT/vfs.log" | head -10 || true
+
+      - name: Gate
+        run: |
+          set -euo pipefail
+          python3 packprobe/gate.py out/vfs.txt | tee out/gate.txt
 
       - name: Upload
         if: always()

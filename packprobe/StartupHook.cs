@@ -47,6 +47,10 @@ internal static class StartupHook
     {
         try
         {
+            bool startup = InvokeGlyphFix();
+            Console.WriteLine($"{T} glyphfixStartup={startup}");
+
+            ProbeUniqueDef();
             Probe("Things/Pawn/Animal/Alpaca", "Alpaca");
             Probe("Things/Pawn/Animal/Ibex", "IbexMale");
             Probe("Things/Pawn/Animal/Lynx", "Lynx");
@@ -63,6 +67,77 @@ internal static class StartupHook
             try { Root.Shutdown(); } catch { }
             Environment.Exit(0);
         }
+    }
+
+    private static bool InvokeGlyphFix()
+    {
+        try
+        {
+            Type startup = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                .FirstOrDefault(t => t.FullName == "AgentTouchFix.Bootstrap");
+            if (startup == null)
+            {
+                Console.WriteLine($"{T} startup: GlyphFix not installed");
+                return false;
+            }
+            System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(startup.TypeHandle);
+            Console.WriteLine($"{T} startup: GlyphFix Bootstrap invoked");
+            return true;
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"{T} startup fatal {e.GetType().Name}: {e.Message}");
+            return false;
+        }
+    }
+
+    private static void ProbeUniqueDef()
+    {
+        const string defName = "Gun_Revolver_Unique";
+        ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(defName);
+        if (def == null)
+        {
+            Console.WriteLine($"{T} unique present=false def={defName}");
+            return;
+        }
+
+        try { Widgets.ThingIcon(new Rect(0f, 0f, 128f, 128f), def); }
+        catch (Exception e) { Console.WriteLine($"{T} unique thingIcon EXC {e.GetType().Name}: {e.Message}"); }
+
+        Graphic outer = def.graphic;
+        Graphic inner = outer;
+        for (int depth = 0; inner != null && depth < 8; depth++)
+        {
+            if (inner is Graphic_Collection) break;
+            System.Reflection.FieldInfo child = inner.GetType().GetField("subGraphic",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Instance);
+            if (child == null || !(child.GetValue(inner) is Graphic next)) break;
+            inner = next;
+        }
+
+        Graphic_Collection collection = inner as Graphic_Collection;
+        Graphic[] subs = collection?.subGraphics ?? Array.Empty<Graphic>();
+        int masks = subs.Count(g => IsMask(Leaf(g?.path)));
+        Console.WriteLine($"{T} unique def={defName} outer={outer?.GetType().Name ?? "<null>"}"
+                          + $" inner={inner?.GetType().Name ?? "<null>"} subCount={subs.Length} masks={masks}");
+
+        Texture2D ui = def.uiIcon;
+        bool bad = ui == null || (BaseContent.BadTex != null && ReferenceEquals(ui, BaseContent.BadTex));
+        bool mask = ui != null && IsMask(Leaf(ui.name));
+        int pixels = Pixels(ui);
+        string verdict = !bad && ui != null && ui.width > 2 && !mask && pixels > 0 ? "DRAW" : "BAD";
+        Console.WriteLine($"{T} unique uiIcon='{(ui == null ? "<null>" : ui.name)}'"
+                          + $" bad={bad} mask={mask} size={(ui == null ? "-" : ui.width + "x" + ui.height)}"
+                          + $" pixels={pixels} verdict={verdict}");
+    }
+
+    private static int Pixels(Texture2D texture)
+    {
+        if (texture == null) return -1;
+        try { return texture.GetPixels32()?.Length ?? -1; }
+        catch { return -1; }
     }
 
     private static void Probe(string folder, string leaf)
@@ -83,7 +158,8 @@ internal static class StartupHook
         Console.WriteLine($"{T} folder count={all.Count}");
         foreach (Texture2D t in all.Take(24))
         {
-            Console.WriteLine($"{T}   raw name='{t.name}' {t.width}x{t.height}");
+            Console.WriteLine($"{T}   raw name='{t.name}' {t.width}x{t.height}"
+                              + $" fmt={t.format} mask={IsMask(Leaf(t.name))} pixels={Pixels(t)}");
         }
 
         foreach (string suffix in new[] { "_south", "_north", "_east", "_west" })
@@ -121,5 +197,33 @@ internal static class StartupHook
         {
             Console.WriteLine($"{T} graphic fatal {e.GetType().Name}: {e.Message}");
         }
+    }
+
+    private static bool IsMask(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        string s = name;
+        bool peeled = true;
+        while (peeled)
+        {
+            peeled = false;
+            foreach (string ext in new[] { ".png", ".jpg", ".jpeg", ".psd", ".dds" })
+            {
+                if (s.Length > ext.Length && s.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                {
+                    s = s.Substring(0, s.Length - ext.Length);
+                    peeled = true;
+                    break;
+                }
+            }
+        }
+        return s.EndsWith("_m", StringComparison.Ordinal);
+    }
+
+    private static string Leaf(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "<null>";
+        int slash = path.LastIndexOfAny(new[] { '/', '\\' });
+        return slash < 0 ? path : path.Substring(slash + 1);
     }
 }
